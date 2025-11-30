@@ -187,7 +187,9 @@ class Model(nn.Module):
         else:
             # Single-scale mode: use standard fixed-length patches
             if verbose:
-                print(f\"Using Single-Scale PatchTST with patch_len={patch_len}, stride={stride}\")\n            \n            if self.decomposition:
+                print(f"Using Single-Scale PatchTST with patch_len={patch_len}, stride={stride}")
+            
+            if self.decomposition:
                 self.decomp_module = series_decomp(kernel_size)
                 self.model_trend = PatchTST_backbone(c_in=c_in, context_window = context_window, target_window=target_window, patch_len=patch_len, stride=stride, 
                                       max_seq_len=max_seq_len, n_layers=n_layers, d_model=d_model,
