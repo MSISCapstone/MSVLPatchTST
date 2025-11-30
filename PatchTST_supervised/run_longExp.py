@@ -50,6 +50,12 @@ if __name__ == '__main__':
     parser.add_argument('--kernel_size', type=int, default=25, help='decomposition-kernel')
     parser.add_argument('--individual', type=int, default=0, help='individual head; True 1 False 0')
     parser.add_argument('--channel_independent', type=int, default=1, help='channel independence; 0: cross-channel (variables interact), 1: channel-independent (variables separate); default 1')
+    
+    # Multi-scale patching (variable-length patches)
+    parser.add_argument('--multi_scale', type=int, default=0, help='enable multi-scale patching; 0: disabled (use single patch_len), 1: enabled (use multiple patch lengths)')
+    parser.add_argument('--patch_lengths', type=str, default='16', help='comma-separated patch lengths for multi-scale (e.g., "6,12,24" for weather); ignored if multi_scale=0')
+    parser.add_argument('--patch_strides', type=str, default='8', help='comma-separated strides for multi-scale (e.g., "3,6,12"); ignored if multi_scale=0')
+    parser.add_argument('--patch_weights', type=str, default='1.0', help='comma-separated weights for multi-scale fusion (e.g., "0.2,0.5,0.3"); auto-normalized; ignored if multi_scale=0')
 
     # Formers 
     parser.add_argument('--embed_type', type=int, default=0, help='0: default 1: value embedding + temporal embedding + positional embedding 2: value embedding + temporal embedding 3: value embedding + positional embedding 4: value embedding')
@@ -94,6 +100,29 @@ if __name__ == '__main__':
     parser.add_argument('--test_flop', action='store_true', default=False, help='See utils/tools for usage')
 
     args = parser.parse_args()
+    
+    # Parse multi-scale parameters if enabled
+    if args.multi_scale:
+        args.patch_lengths = [int(x.strip()) for x in args.patch_lengths.split(',')]
+        args.patch_strides = [int(x.strip()) for x in args.patch_strides.split(',')]
+        args.patch_weights = [float(x.strip()) for x in args.patch_weights.split(',')]
+        
+        # Validation
+        assert len(args.patch_lengths) == len(args.patch_strides), \
+            f"Number of patch lengths ({len(args.patch_lengths)}) must match number of strides ({len(args.patch_strides)})"
+        assert len(args.patch_lengths) == len(args.patch_weights), \
+            f"Number of patch lengths ({len(args.patch_lengths)}) must match number of weights ({len(args.patch_weights)})"
+        assert all(pl > 0 for pl in args.patch_lengths), "All patch lengths must be positive"
+        assert all(ps > 0 for ps in args.patch_strides), "All strides must be positive"
+        
+        # Normalize weights
+        weight_sum = sum(args.patch_weights)
+        args.patch_weights = [w / weight_sum for w in args.patch_weights]
+        
+        print(f"Multi-scale patching enabled:")
+        print(f"  Patch lengths: {args.patch_lengths}")
+        print(f"  Strides: {args.patch_strides}")
+        print(f"  Normalized weights: {[f'{w:.3f}' for w in args.patch_weights]}")
 
     # random seed
     fix_seed = args.random_seed
