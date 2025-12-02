@@ -49,7 +49,7 @@ do
       --enc_in 21 \
       --channel_independent 0 \
       --e_layers 3 \
-      --n_heads 16 \
+      --n_heads 8 \
       --d_model 128 \
       --d_ff 256 \
       --dropout 0.2 \
@@ -61,7 +61,7 @@ do
       --train_epochs 100 \
       --patience 20 \
       --itr 1 \
-      --batch_size 128 \
+      --batch_size 32 \
       --learning_rate 0.0001 2>&1 | tee -a "$log_file"
     
     echo "========================================" | tee -a "$log_file"
