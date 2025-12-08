@@ -60,12 +60,8 @@ class CustomMultiheadAttention(nn.Module):
         # Additional dropout after output projection
         self.dropout_attn = nn.Dropout(dropout)
         
-        # Batch normalization for attention output
-        self.norm_attn = nn.Sequential(
-            Transpose(1, 2),  # [bs, d_model, seq_len]
-            nn.BatchNorm1d(d_model, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-            Transpose(1, 2)   # [bs, seq_len, d_model]
-        )
+        # Layer normalization for attention output
+        self.norm_attn = nn.LayerNorm(d_model)
     
     def forward(self, query, key, value, attn_mask=None, key_padding_mask=None):
         # Apply projections
@@ -225,11 +221,7 @@ class CrossGroupAttention(nn.Module):
             nn.Linear(d_model * 4, d_model),
             nn.Dropout(dropout)
         )
-        self.norm_ffn = nn.Sequential(
-            Transpose(1, 2),  # [bs * pred_len, d_model, n_channels]
-            nn.BatchNorm1d(d_model, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-            Transpose(1, 2)   # [bs * pred_len, n_channels, d_model]
-        )
+        self.norm_ffn = nn.LayerNorm(d_model)
         
         # Project back to prediction
         self.output_proj = nn.Linear(d_model, 1)
