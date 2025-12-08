@@ -50,8 +50,11 @@ class CustomMultiheadAttention(nn.Module):
         
         # Output projection
         self.to_out = nn.Sequential(
-            nn.Linear(d_model, d_model, bias=True),
-            nn.Dropout(dropout)
+            nn.Linear(d_model, d_model * 2, bias=True),
+            nn.GELU(),
+            nn.Dropout(0.2),
+            nn.Linear(d_model * 2, d_model, bias=True),
+            nn.Dropout(0.2)
         )
         
         # Additional dropout after output projection
@@ -220,7 +223,6 @@ class CrossGroupAttention(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(d_model * 4, d_model),
-            nn.GELU(),
             nn.Dropout(dropout)
         )
         self.norm_ffn = nn.Sequential(
