@@ -1,10 +1,100 @@
-"""
-Model architectures for Physics-Integrated PatchTST
-"""
-
 import torch
 import torch.nn as nn
 import numpy as np
+
+
+class _ScaledDotProductAttention(nn.Module):
+    """Scaled Dot-Product Attention"""
+    
+    def __init__(self, dropout=0.0):
+        super().__init__()
+        self.attn_dropout = nn.Dropout(dropout)
+    
+    def forward(self, query, key, value, attn_mask=None, key_padding_mask=None):
+        # query, key, value: [bs, seq_len, d_model]
+        d_k = query.size(-1)
+        
+        # Compute attention scores
+        scores = torch.matmul(query, key.transpose(-2, -1)) / (d_k ** 0.5)
+        
+        if attn_mask is not None:
+            scores = scores.masked_fill(attn_mask == 0, -1e9)
+        
+        if key_padding_mask is not None:
+            scores = scores.masked_fill(key_padding_mask.unsqueeze(1), -1e9)
+        
+        attn_weights = torch.softmax(scores, dim=-1)
+        attn_weights = self.attn_dropout(attn_weights)
+        
+        output = torch.matmul(attn_weights, value)
+        
+        return output, attn_weights
+
+
+class CustomMultiheadAttention(nn.Module):
+    """Custom multi-head attention with specified structure"""
+    
+    def __init__(self, d_model=128, n_heads=8, dropout=0.0):
+        super().__init__()
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+        
+        # Query, Key, Value projections
+        self.W_Q = nn.Linear(d_model, d_model, bias=True)
+        self.W_K = nn.Linear(d_model, d_model, bias=True)
+        self.W_V = nn.Linear(d_model, d_model, bias=True)
+        
+        # Scaled dot-product attention
+        self.sdp_attn = _ScaledDotProductAttention(dropout=0.0)
+        
+        # Output projection
+        self.to_out = nn.Sequential(
+            nn.Linear(d_model, d_model, bias=True),
+            nn.Dropout(dropout)
+        )
+        
+        # Additional dropout after output projection
+        self.dropout_attn = nn.Dropout(dropout)
+        
+        # Batch normalization for attention output
+        self.norm_attn = nn.Sequential(
+            Transpose(1, 2),  # [bs, d_model, seq_len]
+            nn.BatchNorm1d(d_model, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            Transpose(1, 2)   # [bs, seq_len, d_model]
+        )
+    
+    def forward(self, query, key, value, attn_mask=None, key_padding_mask=None):
+        # Apply projections
+        Q = self.W_Q(query)
+        K = self.W_K(key)
+        V = self.W_V(value)
+        
+        # Scaled dot-product attention
+        attn_output, attn_weights = self.sdp_attn(Q, K, V, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+        
+        # Apply batch normalization
+        attn_output = self.norm_attn(attn_output)
+        
+        # Output projection
+        output = self.to_out(attn_output)
+        
+        # Additional dropout
+        output = self.dropout_attn(output)
+        
+        return output, attn_weights
+
+
+class Transpose(nn.Module):
+    """Transpose module for sequential"""
+    
+    def __init__(self, dim0, dim1):
+        super().__init__()
+        self.dim0 = dim0
+        self.dim1 = dim1
+    
+    def forward(self, x):
+        return x.transpose(self.dim0, self.dim1)
 
 
 class PerChannelEncoder(nn.Module):
@@ -13,10 +103,10 @@ class PerChannelEncoder(nn.Module):
     For groups with hour features integrated, the encoder learns
     the correlation between hour-of-day and physics variables directly.
     
-    Uses a 2-layer feedforward network for learning patterns.
+    Uses custom multi-head attention per channel.
     """
     def __init__(self, n_input_channels, n_output_channels, context_window, target_window, 
-                 patch_len, stride, n_layers=3, d_model=128, n_heads=8, d_ff=256, 
+                 patch_len, stride, d_model=128, n_heads=8, 
                  dropout=0.2, head_dropout=0.0, padding_patch='end'):
         super().__init__()
         
@@ -41,38 +131,19 @@ class PerChannelEncoder(nn.Module):
         self.W_pos = nn.Parameter(torch.zeros(1, patch_num, d_model))
         nn.init.normal_(self.W_pos, std=0.02)
         
-        # Feedforward Network (2 layers)
-        self.deep_ffn = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_ff, d_model),
-            nn.Dropout(dropout)
-        )
-        self.ffn_norm = nn.LayerNorm(d_model)
-        
-        # Transformer encoder layers
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=n_heads,
-            dim_feedforward=d_ff,
-            dropout=dropout,
-            activation='gelu',
-            batch_first=True
-        )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        # Custom multi-head attention for each channel
+        self.attentions = nn.ModuleList([
+            CustomMultiheadAttention(d_model, n_heads, dropout) 
+            for _ in range(n_input_channels)
+        ])
         
         # Per-channel prediction heads (only for OUTPUT channels, not hour features)
         self.head_nf = d_model * patch_num
-        self.heads = nn.ModuleList([
-            nn.Sequential(
-                nn.Flatten(start_dim=-2),
-                nn.Linear(self.head_nf, target_window),
-                nn.Dropout(head_dropout)
-            ) for _ in range(n_output_channels)
-        ])
-        
-        self.dropout = nn.Dropout(dropout)
+        self.final_head = nn.Sequential(
+            nn.Flatten(start_dim=-2, end_dim=-1),
+            nn.Linear(self.head_nf, target_window),
+            nn.Dropout(0.0)
+        )
         
     def forward(self, x, output_channel_mask):
         """
@@ -93,7 +164,6 @@ class PerChannelEncoder(nn.Module):
         
         # Process each channel independently
         outputs = []
-        head_idx = 0
         
         for ch in range(n_ch):
             ch_x = x[:, ch, :, :]  # [bs, patch_num, patch_len]
@@ -102,19 +172,15 @@ class PerChannelEncoder(nn.Module):
             ch_x = self.W_P(ch_x)  # [bs, patch_num, d_model]
             
             # Add positional encoding
-            ch_x = self.dropout(ch_x + self.W_pos)
+            ch_x = ch_x + self.W_pos
             
-            # Apply feedforward for pattern learning
-            ch_x = ch_x + self.deep_ffn(self.ffn_norm(ch_x))  # Residual + FFN
-            
-            # Transformer encoder (channel-independent)
-            ch_z = self.encoder(ch_x)  # [bs, patch_num, d_model]
+            # Custom multi-head attention (per channel)
+            ch_z, _ = self.attentions[ch](ch_x, ch_x, ch_x)  # [bs, patch_num, d_model]
             
             # Only create output for weather channels, not hour features
             if output_channel_mask[ch]:
-                ch_out = self.heads[head_idx](ch_z)  # [bs, target_window]
+                ch_out = self.final_head(ch_z)  # [bs, target_window]
                 outputs.append(ch_out)
-                head_idx += 1
         
         # Stack outputs: [bs, n_output_channels, target_window]
         output = torch.stack(outputs, dim=1)
@@ -142,22 +208,26 @@ class CrossGroupAttention(nn.Module):
         self.norm1 = nn.LayerNorm(d_model)
         
         # Cross-channel attention
-        self.cross_attn = nn.MultiheadAttention(
-            embed_dim=d_model,
-            num_heads=n_heads,
-            dropout=dropout,
-            batch_first=True
+        self.cross_attn = CustomMultiheadAttention(
+            d_model=d_model,
+            n_heads=n_heads,
+            dropout=dropout
         )
         
         # Feed-forward network for refinement (2 layers)
         self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_model * 2),
+            nn.Linear(d_model, d_model * 4),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_model * 2, d_model),
+            nn.Linear(d_model * 4, d_model),
+            nn.GELU(),
             nn.Dropout(dropout)
         )
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm_ffn = nn.Sequential(
+            Transpose(1, 2),  # [bs * pred_len, d_model, n_channels]
+            nn.BatchNorm1d(d_model, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            Transpose(1, 2)   # [bs * pred_len, n_channels, d_model]
+        )
         
         # Project back to prediction
         self.output_proj = nn.Linear(d_model, 1)
@@ -185,7 +255,7 @@ class CrossGroupAttention(nn.Module):
         x_proj = x_proj + x_attn  # Residual connection
         
         # Feed-forward refinement
-        x_ffn = self.ffn(self.norm2(x_proj))
+        x_ffn = self.ffn(self.norm_ffn(x_proj))
         x_proj = x_proj + x_ffn  # Residual connection
         
         # Project back: [bs * pred_len, n_channels, 1]
@@ -270,10 +340,8 @@ class PhysicsIntegratedPatchTST(nn.Module):
                 target_window=configs.pred_len,
                 patch_len=patch_config['patch_len'],
                 stride=patch_config['stride'],
-                n_layers=configs.e_layers,
                 d_model=configs.d_model,
                 n_heads=configs.n_heads,
-                d_ff=configs.d_ff,
                 dropout=configs.dropout,
                 head_dropout=configs.head_dropout,
                 padding_patch=configs.padding_patch

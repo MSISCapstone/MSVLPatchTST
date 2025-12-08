@@ -30,7 +30,7 @@ class PhysicsIntegratedConfig:
         self.dec_in = 23
         self.c_out = 21       # Output only 21 weather channels (exclude hour features)
         self.d_model = 128
-        self.n_heads = 8
+        self.n_heads = 16
         self.e_layers = 3
         self.d_layers = 1
         self.d_ff = 256
@@ -49,7 +49,6 @@ class PhysicsIntegratedConfig:
 
         # Hour-of-day feature configuration
         self.hour_feature_indices = [21, 22]  # hour_sin, hour_cos
-        self.weather_output_channels = 21
 
         # Legacy PatchTST params (for compatibility)
         self.padding_patch = 'end'
@@ -61,7 +60,7 @@ class PhysicsIntegratedConfig:
         self.individual = 1
 
         # Training parameters
-        self.batch_size = 32
+        self.batch_size = 64
         self.learning_rate = 0.0001
         self.train_epochs = 100
         self.patience = 10

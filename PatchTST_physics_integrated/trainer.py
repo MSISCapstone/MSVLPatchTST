@@ -139,6 +139,7 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
         
         print(f"\nEpoch {epoch+1}/{args.train_epochs} | Time: {epoch_duration:.2f}s")
         print(f"  Train Loss: {train_loss_avg:.7f} | Val Loss: {val_loss:.7f} | Test Loss: {test_loss:.7f}")
+        print(f"  Epoch duration: {epoch_duration:.2f} seconds")
         print(f"  Target Variable Losses:")
         for target_name in ['rain', 'temperature', 'wind']:
             if len(batch_target_losses[target_name]) > 0:
