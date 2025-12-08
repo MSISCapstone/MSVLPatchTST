@@ -85,18 +85,27 @@ class MultiScalePatchTST(nn.Module):
     
     def forward(self, x):
         # x: [bs x nvars x seq_len]
-        multi_scale_outputs = []
-        
-        for encoder, weight in zip(self.encoders, self.patch_weights):
-            output = encoder(x)  # [bs x nvars x target_window]
-            multi_scale_outputs.append(output * weight)
-        
-        # Weighted sum of all scales
-        # Each scale is already weighted, so just sum
-        fused_output = torch.stack(multi_scale_outputs, dim=0).sum(dim=0)
-        # fused_output: [bs x nvars x target_window]
-        
-        return fused_output
+        try:
+            multi_scale_outputs = []
+            
+            for i, (encoder, weight) in enumerate(zip(self.encoders, self.patch_weights)):
+                try:
+                    output = encoder(x)  # [bs x nvars x target_window]
+                    multi_scale_outputs.append(output * weight)
+                except Exception as e:
+                    print(f"Error in scale {i}: {str(e)}")
+                    print(f"  Input shape: {x.shape}")
+                    print(f"  Patch len: {self.patch_lengths[i]}, Stride: {self.patch_strides[i]}")
+                    raise
+            
+            # Weighted sum of all scales
+            fused_output = sum(multi_scale_outputs)
+            # fused_output: [bs x nvars x target_window]
+            
+            return fused_output
+        except Exception as e:
+            print(f"MultiScalePatchTST forward error: {str(e)}")
+            raise
 
 
 class Model(nn.Module):

@@ -399,6 +399,148 @@ Weather forecasting models that use cross-channel information:
 2. Implement efficient attention (e.g., sparse attention patterns)
 3. Add channel-wise masking for robustness
 
+---
+
+## TSTdEncoder vs TSTiEncoder — Detailed comparison (code, matrices, memory, parameters, tradeoffs)
+
+This section summarizes the practical and quantitative differences between the two encoder choices discussed in this document: the original channel-independent encoder (TSTiEncoder) and the proposed channel-dependent (TSTdEncoder). It highlights the code-level change, the attention-matrix math, memory and parameter footprints, runtime implications, and recommended settings for the 21-variable weather dataset.
+
+### 1) Code difference (high level)
+- TSTiEncoder (channel-independent): Reshapes input so channels are flattened into the batch dimension -> each channel is processed with self-attention independently.
+- TSTdEncoder (channel-dependent / cross-channel): Reshapes input by concatenating the per-channel patches into one long token sequence per sample so self-attention operates across all patches from all channels.
+
+Pseudocode (contrast):
+
+- TSTiEncoder (current):
+
+```python
+# x: [bs, nvars, patch_len, patch_num]
+x = x.permute(0,1,3,2)                           # [bs, nvars, patch_num, patch_len]
+x = W_P(x)                                     # [bs, nvars, patch_num, d_model]
+u = x.reshape(bs * nvars, patch_num, d_model)  # >> treat each channel separately
+z = encoder(u)                                 # attention only within each channel
+z = z.reshape(bs, nvars, patch_num, d_model)
+```
+
+- TSTdEncoder (proposed):
+
+```python
+# x: [bs, nvars, patch_len, patch_num]
+x = x.permute(0,1,3,2)                             # [bs, nvars, patch_num, patch_len]
+x = W_P(x)                                         # [bs, nvars, patch_num, d_model]
+x = x.reshape(bs, nvars * patch_num, d_model)      # >> joint tokens across channels
+z = encoder(x)                                     # attention across channels and time
+z = z.reshape(bs, nvars, patch_num, d_model)
+```
+
+### 2) Attention / matrix math (how tokens are arranged)
+- For a single sample: let L = patch_num (patch count per variable) and C = nvars (channels).
+
+- TSTiEncoder (per-channel attention):
+    - Each channel uses attention on L tokens.
+    - Attention matrix size per channel: L × L.
+    - For a batch of size B: it runs B × C attention matrices, each L×L (but attention is computed per sample-channel pair).
+
+- TSTdEncoder (cross-channel attention):
+    - Tokens combined into sequence length S = C × L.
+    - Single attention matrix per sample: S × S = (C × L) × (C × L).
+
+Example with weather config used in this repo: C = 21 variables, seq_len → patch_len=16, stride 8, seq_len=336 → approx L ≈ 42 patches
+
+    - TSTiEncoder: attention matrix per channel = 42 × 42 = 1,764 elements
+        - For C=21 channels: 21 matrices each 1,764 elements → 37,044 elements per sample
+    - TSTdEncoder: attention matrix per sample = (21 × 42)² = 882² = 777,924 elements per sample
+
+The cross-channel attention matrix is ~21× larger compared with adding up the independent channel matrices and results in dramatically higher memory and compute.
+
+### 3) Memory footprint & compute complexity (practical estimate)
+- Attention matrix size scales O(S²) where S is the number of tokens the attention layer processes.
+- Comparing per-sample attention memory in bytes (assume float32, 4 bytes per element):
+
+    - TSTiEncoder (per sample): 37,044 × 4 ≈ 148 KB
+    - TSTdEncoder (per sample): 777,924 × 4 ≈ 3.11 MB
+
+    - For batch B=32:
+        - TSTiEncoder total attention ≈ 32 × 0.148 MB ≈ 4.7 MB
+        - TSTdEncoder total attention ≈ 32 × 3.11 MB ≈ 99.5 MB
+
+This shows the attention-only memory cost increases roughly by ~21× for cross-channel attention in this example. In practice other activations, Q/K/V projections, intermediate tensors, and optimizer states make total GPU memory even larger (attention is often the dominant OOM culprit).
+
+Compute complexity (time): attention uses O(S² × d) operations per layer (d=d_model). So cross-channel increases compute similarly.
+
+### 4) Parameter count differences
+- Parameter counts themselves don't necessarily explode dramatically when switching encoders if the encoder architecture (layer count, d_model, d_ff, number of heads) is unchanged and you reuse the same layer design; the encoder layers will have comparable parameters. However the shape of projection matrices and possibly mixing modules can change slightly:
+
+    - In both encoders, per-layer Transformer parameters scale with d_model, d_ff and number of heads; the same hyperparameters typically imply similar parameter counts.
+    - If using per-channel independent encoder instances (i.e., separate parameters per channel) you would multiply parameters by C — but we *do not* do that in TSTiEncoder. TSTiEncoder shares weights across channels by flattening channels into batch dimension, so parameter counts remain *roughly identical* between TSTi and TSTd as implemented here.
+
+Summary: parameter count difference is small when *weight sharing* is kept; the main cost is memory & compute due to S² attention operations, not parameter count.
+
+### 5) Practical runtime / GPU constraints (why OOM occurs on 8GB RTX 4060)
+- In cross-channel mode, one attention matrix for S=C×L tokens causes large intermediate tensors (Q, K, V, attention scores), which are stored during forward/backward pass. The example earlier showed a single sample produces ~3.11MB for attention scores alone; with full forward/backward buffers, projections, gradients, and other overheads this easily grows into multiple GBs for realistic batch sizes and multiple layers.
+- On 8GB GPUs this frequently causes OOM for weather (21 channels + L in the 30–60 range). Channel-dependent mode → training with n_heads large or batch_size > 32 quickly OOMs.
+
+### 6) When the parameter counts change (when they'd change)
+- If you decide to create separate encoder parameters for each channel (no shared weights), TSTi parameters would blow up by ≈×C, which is usually undesirable. The approach in this repo shares weights, so parameter counts are similar.
+
+### 7) Trade-offs, influence on learning, and when to use which
+- When to prefer TSTiEncoder (channel-independent):
+    - Low-memory devices (8GB GPUs) or very large C (many channels)
+    - When model generalization across variable counts is a priority
+    - If channels are weakly dependent and univariate modeling suffices
+    - For quick experimentation and faster training
+
+- When to prefer TSTdEncoder (cross-channel):
+    - When strong cross-variable relationships exist (e.g., weather physics)
+    - When GPU memory and compute allow larger S (≥ 16 GB class GPUs) or you can reduce other factors (smaller batch_size, fewer layers, smaller d_model)
+    - When learning lead/lag relationships *across* variables is essential for improved long-horizon forecasting
+
+### 8) Practical mitigation strategies if you want cross-channel but have memory limits
+- Reduce batch size (single most effective) — but this can slow training and increase variance
+- Reduce d_model (embedding size) — reduces QKV/projection sizes linearly
+- Reduce number of layers or attention heads — lightweight network
+- Lower L (fewer patches) by increasing patch_len or stride — fewer tokens per channel
+- Mixed-precision training (AMP) — halves memory for activations but needs stable numerics
+- Gradient checkpointing / activation recomputation — trades compute for memory
+- Sparse attention or block-sparse attention — reduces O(S²) cost to O(S × k) for limited context
+- Hybrid architecture (some heads/channel-independent): keep most heads independent and allocate a few heads for cross-channel (hybrid approach described earlier)
+
+### 9) Estimated numbers for configurations in this repository (practical examples)
+- Example baseline (current channel-independent) — safe for RTX 4060 8GB:
+    - C=21, L≈42, d_model=128, n_heads=8, batch_size=32 → fits comfortably
+
+- Example cross-channel full (unsafe on 8GB):
+    - C=21, L≈42, d_model=128, n_heads=16, batch_size=32 → OOM likely
+
+- Memory-friendly cross-channel adjustments:
+    - Use batch_size=8–16
+    - Use d_model=64 or 96
+    - Use n_heads=4–8
+    - Use gradient checkpointing and AMP
+
+### 10) Recommended defaults for weather experiments (balance accuracy / memory)
+- Channel-independent baseline (good default):
+    - d_model=128, n_heads=8, batch_size=32, patch_len=16, stride=8
+
+- Cross-channel experiment (medium GPU, 16GB+ preferred):
+    - d_model=128, n_heads=8, batch_size=8–16, patch_len=16, stride=8
+    - Alternatively d_model=96, n_heads=6 if memory constrained
+
+- Hybrid cross-channel (best compromise):
+    - Use hybrid encoder with 50% heads channel-independent, 50% cross-channel
+    - Keeps S smaller for some heads and lets other heads model cross-variable interactions
+
+### 11) Short checklist when switching to cross-channel on weather dataset
+1. Check GPU memory; pick batch size accordingly
+2. Start with smaller d_model or fewer layers and scale up
+3. Use AMP and checkpointing on limited GPUs
+4. Monitor memory with a small debug run before full experiments
+5. Consider Hybrid to get most of both worlds
+
+---
+
+This section should be used as a reference for deciding whether cross-channel attention is desirable in weather experiments and gives practical mitigation options for hardware-constrained environments.
+
 ### Phase 3: Hybrid Approach
 Create a **selective cross-channel attention**:
 - Some heads do channel-independent attention (preserve generalization)

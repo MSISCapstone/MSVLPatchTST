@@ -175,7 +175,8 @@ ipython_config.py
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
+
 
 # Thumbnails
 ._*
@@ -462,4 +463,12 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+# Project-specific outputs
+*/test_results/*
+*/results/*
+/logs/
+
 # End of https://www.toptal.com/developers/gitignore/api/emacs,jetbrains+all,jupyternotebooks,linux,macos,microsoftoffice,notepadpp,python,tortoisegit,vim,visualstudiocode,windows
+*/result.txt
+datasets/weather/weather_with_hour.csv
+checkpoints_physics_integrated

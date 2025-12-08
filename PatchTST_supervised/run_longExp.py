@@ -4,6 +4,8 @@ import torch
 from exp.exp_main import Exp_Main
 import random
 import numpy as np
+import time
+from datetime import datetime
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Autoformer & Transformer family for Time Series Forecasting')
@@ -26,7 +28,7 @@ if __name__ == '__main__':
     parser.add_argument('--target', type=str, default='OT', help='target feature in S or MS task')
     parser.add_argument('--freq', type=str, default='h',
                         help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
-    parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
+    parser.add_argument('--checkpoints', type=str, default='/content/model/checkpoints/', help='location of model checkpoints')
 
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')
@@ -80,7 +82,7 @@ if __name__ == '__main__':
     parser.add_argument('--do_predict', action='store_true', help='whether to predict unseen future data')
 
     # optimization
-    parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
+    parser.add_argument('--num_workers', type=int, default=0, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=2, help='experiments times')
     parser.add_argument('--train_epochs', type=int, default=100, help='train epochs')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size of train input data')
@@ -145,6 +147,14 @@ if __name__ == '__main__':
     Exp = Exp_Main
 
     if args.is_training:
+        print('\n' + '='*80)
+        print('TRAINING STARTED')
+        print('='*80)
+        training_start_time = time.time()
+        training_start_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f'Start Time: {training_start_datetime}')
+        print('='*80 + '\n')
+        
         for ii in range(args.itr):
             # setting record of experiments
             setting = '{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(
@@ -165,8 +175,15 @@ if __name__ == '__main__':
                 args.distil,
                 args.des,ii)
 
-            exp = Exp(args)  # set experiments
+            iter_start_time = time.time()
+            iter_start_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            print('\n' + '='*80)
+            print(f'Iteration {ii + 1}/{args.itr}')
+            print(f'Start: {iter_start_datetime}')
+            print('='*80)
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
+            exp = Exp(args)  # set experiments
             exp.train(setting)
 
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
@@ -176,7 +193,27 @@ if __name__ == '__main__':
                 print('>>>>>>>predicting : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 exp.predict(setting, True)
 
+            iter_end_time = time.time()
+            iter_elapsed = iter_end_time - iter_start_time
+            iter_elapsed_formatted = time.strftime('%H:%M:%S', time.gmtime(iter_elapsed))
+            print(f'Iteration {ii + 1} Completed in: {iter_elapsed_formatted}')
+            print('='*80 + '\n')
+
             torch.cuda.empty_cache()
+        
+        # Print total training time
+        training_end_time = time.time()
+        training_end_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        total_training_time = training_end_time - training_start_time
+        total_training_formatted = time.strftime('%H:%M:%S', time.gmtime(total_training_time))
+        
+        print('\n' + '='*80)
+        print('TRAINING COMPLETED')
+        print('='*80)
+        print(f'Start Time: {training_start_datetime}')
+        print(f'End Time:   {training_end_datetime}')
+        print(f'Total Time: {total_training_formatted}')
+        print('='*80 + '\n')
     else:
         ii = 0
         setting = '{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(args.model_id,
