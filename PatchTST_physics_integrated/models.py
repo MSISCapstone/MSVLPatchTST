@@ -50,11 +50,11 @@ class CustomMultiheadAttention(nn.Module):
         
         # Output projection
         self.to_out = nn.Sequential(
-            nn.Linear(d_model, d_model * 2, bias=True),
+            nn.Linear(d_model, d_model * 4, bias=True),
             nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(d_model * 2, d_model, bias=True),
-            nn.Dropout(0.2)
+            nn.Linear(d_model * 4, d_model * 4),
+            nn.GELU(),
+            nn.Linear(d_model * 4, d_model, bias=True),
         )
         
         # Additional dropout after output projection
