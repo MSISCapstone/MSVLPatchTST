@@ -41,8 +41,8 @@ class PhysicsIntegratedConfig:
         # Variable-length patching configuration (Predictor-Based grouping)
         self.channel_groups = self._define_channel_groups()
         self.patch_configs = {
-            'long_channel': {'patch_len': 24, 'stride': 12, 'weight': 0.5},
-            'short_channel': {'patch_len': 6, 'stride': 3, 'weight': 0.5}
+            'long_channel': {'patch_len': 24, 'stride': 12, 'weight': 0.5},  # 50% overlap for smooth long-term trends
+            'short_channel': {'patch_len': 6, 'stride': 6, 'weight': 0.5}    # No overlap to capture rapid variations
         }
 
         # Hour-of-day feature configuration
