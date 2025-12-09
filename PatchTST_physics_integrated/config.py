@@ -28,7 +28,7 @@ class PhysicsIntegratedConfig:
         self.model = 'PhysicsIntegratedPatchTST'
         self.enc_in = 23      # Total channels: 21 weather + 2 hour-of-day
         self.dec_in = 23
-        self.c_out = 21       # Output only 21 weather channels (exclude hour features)
+        self.c_out = 23       # Output all 23 channels (optimize only on targets)
         self.d_model = 128
         self.n_heads = 16
         self.e_layers = 3
@@ -41,10 +41,8 @@ class PhysicsIntegratedConfig:
         # Variable-length patching configuration (Predictor-Based grouping)
         self.channel_groups = self._define_channel_groups()
         self.patch_configs = {
-            'rain_predictors': {'patch_len': 24, 'stride': 12, 'weight': 0.25},
-            'temperature_predictors': {'patch_len': 36, 'stride': 18, 'weight': 0.30},
-            'wind_predictors': {'patch_len': 32, 'stride': 16, 'weight': 0.20},
-            'other_variables': {'patch_len': 24, 'stride': 12, 'weight': 0.25}
+            'long_channel': {'patch_len': 24, 'stride': 12, 'weight': 0.5},  # 50% overlap for smooth long-term trends
+            'short_channel': {'patch_len': 6, 'stride': 6, 'weight': 0.5}    # No overlap to capture rapid variations
         }
 
         # Hour-of-day feature configuration
@@ -89,48 +87,24 @@ class PhysicsIntegratedConfig:
         self.loss = 'mse'
 
     def _define_channel_groups(self):
-        """Define predictor-based channel grouping"""
+        """Define long and short channel grouping"""
+        # Define all 23 channel names (21 weather + 2 hour features)
+        full_names = ['p (mbar)', 'T (degC)', 'Tpot (K)', 'rh (%)', 'VPmax (mbar)', 'VPact (mbar)', 'VPdef (mbar)', 
+                      'wv (m/s)', 'max. wv (m/s)', 'wd (deg)', 'rain (mm)', 'raining (s)', 'sh (g/kg)', 
+                      'H2OC (mmol/mol)', 'rho (g/m**3)', 'Tdew (degC)', 'Tlog (degC)', 'CO2 (ppm)', 
+                      'PAR (umol/m2/s)', 'Tmax (degC)', 'Tmin (degC)', 'hour_sin', 'hour_cos']
+        
         return {
-            'rain_predictors': {
-                'indices': [10, 11, 3, 15, 13, 12, 5, 4, 6, 0, 2, 14, 7, 8, 9, 18, 21, 22],
-                'names': ['rain (mm)', 'raining (s)', 'rh (%)', 'Tdew (degC)', 'H2OC (mmol/mol)', 
-                          'sh (g/kg)', 'VPact (mbar)', 'VPmax (mbar)', 'VPdef (mbar)',
-                          'p (mbar)', 'Tpot (K)', 'rho (g/m**3)', 
-                          'wv (m/s)', 'max. wv (m/s)', 'wd (deg)', 'PAR (umol/m2/s)',
-                          'hour_sin', 'hour_cos'],
-                'output_indices': [10, 11],
-                'description': 'Rain Predictors: self-history + humidity + vapor pressure + pressure + wind + radiation + hour'
+            'long_channel': {
+                'indices': list(range(23)),  # All 23 input channels
+                'names': full_names,
+                'output_indices': [10, 1, 2, 7],  # rain (mm), T (degC), Tpot (K), wv (m/s) - targets for optimization
+                'description': 'Long channel predictors for rain, temperature, wind speed'
             },
-            'temperature_predictors': {
-                'indices': [1, 2, 15, 18, 0, 14, 7, 8, 9, 3, 12, 13, 5, 4, 6, 21, 22],
-                'names': ['T (degC)', 'Tpot (K)', 'Tdew (degC)', 'PAR (umol/m2/s)',
-                          'p (mbar)', 'rho (g/m**3)', 
-                          'wv (m/s)', 'max. wv (m/s)', 'wd (deg)',
-                          'rh (%)', 'sh (g/kg)', 'H2OC (mmol/mol)', 
-                          'VPact (mbar)', 'VPmax (mbar)', 'VPdef (mbar)',
-                          'hour_sin', 'hour_cos'],
-                'output_indices': [1, 2, 15],
-                'description': 'Temperature Predictors: self-history + radiation + pressure + wind + humidity + vapor pressure + hour'
-            },
-            'wind_predictors': {
-                'indices': [7, 8, 0, 2, 1, 15, 18, 3, 12, 13, 5, 4, 6, 14, 9, 21, 22],
-                'names': ['wv (m/s)', 'max. wv (m/s)', 'p (mbar)', 'Tpot (K)',
-                          'T (degC)', 'Tdew (degC)', 'PAR (umol/m2/s)',
-                          'rh (%)', 'sh (g/kg)', 'H2OC (mmol/mol)', 
-                          'VPact (mbar)', 'VPmax (mbar)', 'VPdef (mbar)',
-                          'rho (g/m**3)', 'wd (deg)',
-                          'hour_sin', 'hour_cos'],
-                'output_indices': [7, 8],
-                'description': 'Wind Speed Predictors: self-history + pressure + temperature + humidity + vapor pressure + density + wind direction + hour'
-            },
-            'other_variables': {
-                'indices': [0, 3, 4, 5, 6, 9, 12, 13, 14, 16, 17, 18, 19, 20, 1, 2, 15, 7, 8, 21, 22],
-                'names': ['p (mbar)', 'rh (%)', 'VPmax (mbar)', 'VPact (mbar)', 'VPdef (mbar)',
-                          'wd (deg)', 'sh (g/kg)', 'H2OC (mmol/mol)', 'rho (g/m**3)',
-                          'Tlog (degC)', 'CO2 (ppm)', 'PAR (umol/m2/s)', 'Tmax (degC)', 'Tmin (degC)',
-                          'T (degC)', 'Tpot (K)', 'Tdew (degC)', 'wv (m/s)', 'max. wv (m/s)',
-                          'hour_sin', 'hour_cos'],
-                'output_indices': [0, 3, 4, 5, 6, 9, 12, 13, 14, 16, 17, 18, 19, 20],
-                'description': 'Other Variables: pressure, humidity, vapor pressure, wind direction, moisture, density, derived temperature, CO2, radiation'
+            'short_channel': {
+                'indices': list(range(23)),  # All 23 input channels
+                'names': full_names,
+                'output_indices': [11, 15, 8],  # raining (s), Tdew (degC), max. wv (m/s) - targets for optimization
+                'description': 'Short channel predictors for raining duration, dew point, max wind'
             }
         }

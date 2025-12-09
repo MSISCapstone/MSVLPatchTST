@@ -23,7 +23,7 @@ def set_seed(seed: int):
 
 def get_target_indices(channel_groups: dict) -> Tuple[list, list]:
     """
-    Get target indices from rain, temperature, and wind predictors.
+    Get target indices from all channel groups.
     
     Args:
         channel_groups: Dictionary of channel groups
@@ -35,8 +35,7 @@ def get_target_indices(channel_groups: dict) -> Tuple[list, list]:
     target_indices = []
     target_names = []
     
-    for group_key in ['rain_predictors', 'temperature_predictors', 'wind_predictors']:
-        group = channel_groups[group_key]
+    for group in channel_groups.values():
         for idx in group['output_indices']:
             target_indices.append(idx)
             name_idx = group['indices'].index(idx)
@@ -67,10 +66,10 @@ def validate(model, val_loader, criterion, device, target_indices):
             batch_x = batch_x.float().to(device)
             batch_y = batch_y.float().to(device)
             
-            # Forward pass - outputs only weather channels (21)
-            outputs = model(batch_x)  # [bs, pred_len, 21]
-            outputs_selected = outputs[:, -model.pred_len:, :][:, :, target_indices]
-            batch_y_selected = batch_y[:, -model.pred_len:, :][:, :, target_indices]
+            # Forward pass - outputs all 23 channels
+            outputs = model(batch_x)  # [bs, pred_len, 23]
+            outputs_selected = outputs[:, -model.pred_len:, target_indices]
+            batch_y_selected = batch_y[:, -model.pred_len:, target_indices]
             
             loss = criterion(outputs_selected.cpu(), batch_y_selected.cpu())
             total_loss.append(loss.item())

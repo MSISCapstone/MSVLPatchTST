@@ -48,6 +48,9 @@ def evaluate_model(model, test_loader, device, args):
     Returns:
         Dictionary with predictions, ground truth, and inputs
     """
+    from .training_utils import get_target_indices
+    target_indices, _ = get_target_indices(args.channel_groups)
+    
     model.eval()
     
     preds = []
@@ -62,10 +65,10 @@ def evaluate_model(model, test_loader, device, args):
             # Forward pass
             outputs = model(batch_x)
             
-            # Store predictions and ground truth
-            pred = outputs[:, -args.pred_len:, :].cpu().numpy()
-            true = batch_y[:, -args.pred_len:, :args.c_out].cpu().numpy()
-            inp = batch_x[:, :, :args.c_out].cpu().numpy()
+            # Store predictions and ground truth for target indices only
+            pred = outputs[:, -model.pred_len:, target_indices].cpu().numpy()
+            true = batch_y[:, -model.pred_len:, target_indices].cpu().numpy()
+            inp = batch_x[:, :, target_indices].cpu().numpy()
             
             preds.append(pred)
             trues.append(true)
@@ -111,9 +114,9 @@ def evaluate_per_channel(preds, trues, target_indices, target_names):
     Calculate per-channel metrics for target variables.
     
     Args:
-        preds: Predictions [samples, time_steps, channels]
-        trues: Ground truth [samples, time_steps, channels]
-        target_indices: List of channel indices
+        preds: Predictions [samples, time_steps, num_targets] - already filtered to target channels
+        trues: Ground truth [samples, time_steps, num_targets] - already filtered to target channels
+        target_indices: List of original channel indices (not used for indexing preds/trues)
         target_names: List of channel names
         
     Returns:
@@ -121,9 +124,11 @@ def evaluate_per_channel(preds, trues, target_indices, target_names):
     """
     per_channel_metrics = {}
     
-    for ch_idx, ch_name in zip(target_indices, target_names):
-        pred_ch = preds[:, :, ch_idx]
-        true_ch = trues[:, :, ch_idx]
+    # preds and trues are already filtered to contain only target channels in order
+    # so we iterate through channels sequentially (0, 1, 2, ...)
+    for i, ch_name in enumerate(target_names):
+        pred_ch = preds[:, :, i]
+        true_ch = trues[:, :, i]
         
         mae = np.mean(np.abs(pred_ch - true_ch))
         mse = np.mean((pred_ch - true_ch) ** 2)

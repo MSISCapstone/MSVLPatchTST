@@ -283,9 +283,9 @@ class PhysicsIntegratedPatchTST(nn.Module):
         self.seq_len = configs.seq_len
         self.pred_len = configs.pred_len
         self.enc_in = configs.enc_in  # 23 (21 weather + 2 hour)
-        self.c_out = configs.c_out    # 21 (weather only)
         self.channel_groups = configs.channel_groups
         self.patch_configs = configs.patch_configs
+        self.c_out = configs.c_out  # Output all 23 channels
         self.hour_indices = set(configs.hour_feature_indices)  # {21, 22}
         
         # RevIN for normalization (all input channels)
@@ -340,12 +340,15 @@ class PhysicsIntegratedPatchTST(nn.Module):
                 head_dropout=configs.head_dropout,
                 padding_patch=configs.padding_patch
             )
-        
-        self.group_weights = {name: cfg['weight'] for name, cfg in self.patch_configs.items()}
+                
+        # Collect all target indices in order
+        self.target_indices = []
+        for group_name in self.channel_groups.keys():
+            self.target_indices.extend(self.group_info[group_name]['output_indices'])
         
         # Cross-group attention layer
         self.cross_group_attn = CrossGroupAttention(
-            n_channels=configs.c_out,  # 21 weather channels
+            n_channels=self.c_out,  # Dynamic
             d_model=configs.d_model // 2,
             n_heads=4,
             dropout=configs.dropout
