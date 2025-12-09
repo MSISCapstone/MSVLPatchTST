@@ -48,6 +48,9 @@ def evaluate_model(model, test_loader, device, args):
     Returns:
         Dictionary with predictions, ground truth, and inputs
     """
+    from .training_utils import get_target_indices
+    target_indices, _ = get_target_indices(args.channel_groups)
+    
     model.eval()
     
     preds = []
@@ -62,10 +65,10 @@ def evaluate_model(model, test_loader, device, args):
             # Forward pass
             outputs = model(batch_x)
             
-            # Store predictions and ground truth
-            pred = outputs[:, -args.pred_len:, :].cpu().numpy()
-            true = batch_y[:, -args.pred_len:, :args.c_out].cpu().numpy()
-            inp = batch_x[:, :, :args.c_out].cpu().numpy()
+            # Store predictions and ground truth for target indices only
+            pred = outputs[:, -model.pred_len:, target_indices].cpu().numpy()
+            true = batch_y[:, -model.pred_len:, target_indices].cpu().numpy()
+            inp = batch_x[:, :, target_indices].cpu().numpy()
             
             preds.append(pred)
             trues.append(true)

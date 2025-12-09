@@ -46,9 +46,8 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
     
     # Target variable losses
     target_variable_losses = {
-        'rain': [],
-        'temperature': [],
-        'wind': []
+        'long': [],
+        'short': []
     }
     
     print(f"\nStarting Physics-Integrated PatchTST Training...")
@@ -69,7 +68,7 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
         epoch_time = time.time()
         train_loss = []
         batch_group_losses = {name: [] for name in args.channel_groups.keys()}
-        batch_target_losses = {'rain': [], 'temperature': [], 'wind': []}
+        batch_target_losses = {'long': [], 'short': []}
         
         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
             optimizer.zero_grad()
@@ -80,9 +79,9 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
             # Forward pass
             outputs = model(batch_x)
             
-            # Target - only selected indices
-            outputs_selected = outputs[:, -args.pred_len:, :][:, :, target_indices]
-            batch_y_selected = batch_y[:, -args.pred_len:, :][:, :, target_indices]
+            # Loss - compute only on target indices
+            outputs_selected = outputs[:, -args.pred_len:, target_indices]
+            batch_y_selected = batch_y[:, -args.pred_len:, target_indices]
             
             # Total loss
             loss = criterion(outputs_selected, batch_y_selected)
@@ -100,17 +99,15 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
                         batch_group_losses[group_name].append(group_loss.item())
                 
                 # Target variable losses
-                rain_indices = args.channel_groups['rain_predictors']['output_indices']
-                temp_indices = args.channel_groups['temperature_predictors']['output_indices']
-                wind_indices = args.channel_groups['wind_predictors']['output_indices']
+                # Get the actual channel indices in the original 23-channel space
+                long_indices = args.channel_groups['long_channel']['output_indices']  # [10, 1, 2, 7]
+                short_indices = args.channel_groups['short_channel']['output_indices']  # [11, 15, 8]
                 
-                rain_loss = criterion(outputs[:, :, rain_indices], batch_y[:, -args.pred_len:, :][:, :, rain_indices])
-                temp_loss = criterion(outputs[:, :, temp_indices], batch_y[:, -args.pred_len:, :][:, :, temp_indices])
-                wind_loss = criterion(outputs[:, :, wind_indices], batch_y[:, -args.pred_len:, :][:, :, wind_indices])
+                long_loss = criterion(outputs[:, :, long_indices], batch_y[:, -args.pred_len:, long_indices])
+                short_loss = criterion(outputs[:, :, short_indices], batch_y[:, -args.pred_len:, short_indices])
                 
-                batch_target_losses['rain'].append(rain_loss.item())
-                batch_target_losses['temperature'].append(temp_loss.item())
-                batch_target_losses['wind'].append(wind_loss.item())
+                batch_target_losses['long'].append(long_loss.item())
+                batch_target_losses['short'].append(short_loss.item())
             
             # Backward pass
             loss.backward()
@@ -131,7 +128,7 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
                 group_train_losses[group_name].append(np.mean(batch_group_losses[group_name]))
         
         # Store target variable losses
-        for target_name in ['rain', 'temperature', 'wind']:
+        for target_name in ['long', 'short']:
             if len(batch_target_losses[target_name]) > 0:
                 target_variable_losses[target_name].append(np.mean(batch_target_losses[target_name]))
         
@@ -141,7 +138,7 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
         print(f"  Train Loss: {train_loss_avg:.7f} | Val Loss: {val_loss:.7f} | Test Loss: {test_loss:.7f}")
         print(f"  Epoch duration: {epoch_duration:.2f} seconds")
         print(f"  Target Variable Losses:")
-        for target_name in ['rain', 'temperature', 'wind']:
+        for target_name in ['long', 'short']:
             if len(batch_target_losses[target_name]) > 0:
                 print(f"    {target_name.capitalize()}: {np.mean(batch_target_losses[target_name]):.7f}")
         
