@@ -114,9 +114,9 @@ def evaluate_per_channel(preds, trues, target_indices, target_names):
     Calculate per-channel metrics for target variables.
     
     Args:
-        preds: Predictions [samples, time_steps, channels]
-        trues: Ground truth [samples, time_steps, channels]
-        target_indices: List of channel indices
+        preds: Predictions [samples, time_steps, num_targets] - already filtered to target channels
+        trues: Ground truth [samples, time_steps, num_targets] - already filtered to target channels
+        target_indices: List of original channel indices (not used for indexing preds/trues)
         target_names: List of channel names
         
     Returns:
@@ -124,9 +124,11 @@ def evaluate_per_channel(preds, trues, target_indices, target_names):
     """
     per_channel_metrics = {}
     
-    for ch_idx, ch_name in zip(target_indices, target_names):
-        pred_ch = preds[:, :, ch_idx]
-        true_ch = trues[:, :, ch_idx]
+    # preds and trues are already filtered to contain only target channels in order
+    # so we iterate through channels sequentially (0, 1, 2, ...)
+    for i, ch_name in enumerate(target_names):
+        pred_ch = preds[:, :, i]
+        true_ch = trues[:, :, i]
         
         mae = np.mean(np.abs(pred_ch - true_ch))
         mse = np.mean((pred_ch - true_ch) ** 2)
