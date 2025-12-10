@@ -94,36 +94,50 @@ graph TD
 ## Proposed Enhancement Architecture (Component View)
 
 ```mermaid
-graph TD
-    A["Input: Weather Time Series"] --> B["RevIN Normalization"]
-    B --> CG["Channel Grouping<br/>Long-term vs Short-term"]
-
-    %% Long Channel Group
-    CG --> LC["Long Channel Group<br/>(Smooth Trends)"]
-    LC --> LC1["ReplicationPad1d"]
-    LC1 --> LC2["Patch Embedding<br/>Linear Transform"]
-    LC2 --> LC3["Per-Channel<br/>MultiheadAttention"]
-    LC3 --> LC4["Feed-Forward Network"]
-    LC4 --> LC5["Flatten Head"]
-
-    %% Short Channel Group
-    CG --> SC["Short Channel Group<br/>(Rapid Variations)"]
-    SC --> SC1["ReplicationPad1d"]
-    SC1 --> SC2["Patch Embedding<br/>Linear Transform"]
-    SC2 --> SC3["Per-Channel<br/>MultiheadAttention"]
-    SC3 --> SC4["Feed-Forward Network"]
-    SC4 --> SC5["Flatten Head"]
-
-    %% Cross-Group Fusion
-    LC5 --> CGA["Cross-Group Attention<br/>Information Fusion"]
-    SC5 --> CGA
+graph TB
+    subgraph Stage1["Stage 1: Input Processing"]
+        direction LR
+        W["Weather Time Series (21 Channels)"] --> A["Input Layer (23 Channels)"]
+        H["Hour-of-Day Features (hour_sin, hour_cos)"] --> A
+        A --> B["RevIN Normalization"]
+        B --> CG["Channel Grouping"]
+    end
     
-    CGA --> CGA1["Channel Projection"]
-    CGA1 --> CGA2["MultiheadAttention<br/>Cross-Channel Interaction"]
-    CGA2 --> CGA3["Feed-Forward Network"]
-    CGA3 --> CGA4["Output Projection"]
-
-    CGA4 --> OUT["Multi-Channel Output<br/>Unified Predictions"]
+    subgraph Stage2["Stage 2: Parallel Channel Encoding"]
+        direction TB
+        
+        subgraph LongPath["Long Channel Processing"]
+            direction LR
+            LC["Long Channel Group"] --> LC1["ReplicationPad1d"]
+            LC1 --> LC2["Patch Embedding"]
+            LC2 --> LC3["Per-Channel MultiheadAttention"]
+            LC3 --> LC4["Feed-Forward Network"]
+            LC4 --> LC5["Flatten Head"]
+        end
+        
+        subgraph ShortPath["Short Channel Processing"]
+            direction LR
+            SC["Short Channel Group"] --> SC1["ReplicationPad1d"]
+            SC1 --> SC2["Patch Embedding"]
+            SC2 --> SC3["Per-Channel MultiheadAttention"]
+            SC3 --> SC4["Feed-Forward Network"]
+            SC4 --> SC5["Flatten Head"]
+        end
+    end
+    
+    subgraph Stage3["Stage 3: Cross-Group Fusion"]
+        direction LR
+        CGA["Cross-Group Attention"] --> CGA1["Channel Projection"]
+        CGA1 --> CGA2["MultiheadAttention"]
+        CGA2 --> CGA3["Feed-Forward Network"]
+        CGA3 --> CGA4["Output Projection"]
+        CGA4 --> OUT["Multi-Channel Output"]
+    end
+    
+    CG --> LC
+    CG --> SC
+    LC5 --> CGA
+    SC5 --> CGA
 
     %% Styling - Blue for existing, Green for enhancements
     classDef existingStyle fill:#bbdefb,stroke:#1976d2,stroke-width:3px,color:#000
@@ -134,15 +148,23 @@ graph TD
     class B,LC1,SC1,LC2,SC2,LC3,SC3,LC4,SC4,LC5,SC5 existingStyle
     
     %% New enhancement components
-    class CG,LC,SC,CGA,CGA1,CGA2,CGA3,CGA4 newStyle
+    class H,CG,LC,SC,CGA,CGA1,CGA2,CGA3,CGA4 newStyle
     
     %% Input/Output
-    class A,OUT outputStyle
+    class W,A,OUT outputStyle
+    
+    %% Make input layer blue
+    class A existingStyle
 ```
 
 ### Architecture Enhancement Explanation
 
 This diagram illustrates how the **Physics-Integrated PatchTST** extends the original architecture with three key innovations:
+
+#### 📥 **Input Enhancement**
+- **Added Hour-of-Day Features**: Temporal encoding (hour_sin, hour_cos) captures daily cyclical patterns
+- **Benefit**: Model learns time-dependent weather behavior (e.g., temperature peaks at afternoon, humidity patterns)
+- **Implementation**: Original 21 weather channels + 2 temporal features = 23 total input channels
 
 #### 🔵 **Existing Components (Blue)** - Reused from Original PatchTST
 These proven components are retained and replicated across channel groups:
