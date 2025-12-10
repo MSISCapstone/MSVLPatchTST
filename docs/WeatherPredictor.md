@@ -97,13 +97,13 @@ graph TD
 graph TB
     subgraph Stage1["Stage 1: Input Processing"]
         direction LR
-        W["Weather Time Series (21 Channels)"] --> A["Input Layer (23 Channels)"]
+        W["Weather Time Series (20 Channels)"] --> A["Input Layer (22 Channels)"]
         H["Hour-of-Day Features (hour_sin, hour_cos)"] --> A
         A --> B["RevIN Normalization"]
         B --> CG["Channel Grouping"]
     end
     
-    subgraph Stage2["Stage 2: Parallel Channel Encoding"]
+    subgraph Stage2["Stage 2: Parallel Channels"]
         direction TB
         
         subgraph LongPath["Long Channel Processing"]
@@ -143,6 +143,7 @@ graph TB
     classDef existingStyle fill:#bbdefb,stroke:#1976d2,stroke-width:3px,color:#000
     classDef newStyle fill:#c8e6c9,stroke:#388e3c,stroke-width:3px,color:#000
     classDef outputStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px,color:#000
+    classDef stage2Style fill:#c8e6c9,stroke:#388e3c,stroke-width:2px,color:#000
 
     %% Existing components from original PatchTST
     class B,LC1,SC1,LC2,SC2,LC3,SC3,LC4,SC4,LC5,SC5 existingStyle
@@ -155,6 +156,9 @@ graph TB
     
     %% Make input layer blue
     class A existingStyle
+
+    %% Stage 2 background
+    class Stage2 stage2Style
 ```
 
 ### Architecture Enhancement Explanation
