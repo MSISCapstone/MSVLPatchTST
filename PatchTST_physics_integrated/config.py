@@ -26,9 +26,11 @@ class PhysicsIntegratedConfig:
 
         # Model parameters
         self.model = 'PhysicsIntegratedPatchTST'
-        self.enc_in = 23      # Total channels: 21 weather + 2 hour-of-day
-        self.dec_in = 23
-        self.c_out = 23       # Output all 23 channels (optimize only on targets)
+        # After dropping the extra 'OT' column the dataset has 22 features
+        # (21 weather variables + 2 hour-of-day features appended later)
+        self.enc_in = 22      # Total input channels after dropping 'OT'
+        self.dec_in = 22
+        self.c_out = 22       # Output all channels
         self.d_model = 128
         self.n_heads = 16
         self.e_layers = 3
@@ -45,8 +47,8 @@ class PhysicsIntegratedConfig:
             'short_channel': {'patch_len': 6, 'stride': 6, 'weight': 0.5}    # No overlap to capture rapid variations
         }
 
-        # Hour-of-day feature configuration
-        self.hour_feature_indices = [21, 22]  # hour_sin, hour_cos
+        # Hour-of-day feature configuration (indices adjusted for enc_in=22)
+        self.hour_feature_indices = [20, 21]  # hour_sin, hour_cos
 
         # Legacy PatchTST params (for compatibility)
         self.padding_patch = 'end'
@@ -88,23 +90,27 @@ class PhysicsIntegratedConfig:
 
     def _define_channel_groups(self):
         """Define long and short channel grouping"""
-        # Define all 23 channel names (21 weather + 2 hour features)
-        full_names = ['p (mbar)', 'T (degC)', 'Tpot (K)', 'rh (%)', 'VPmax (mbar)', 'VPact (mbar)', 'VPdef (mbar)', 
-                      'wv (m/s)', 'max. wv (m/s)', 'wd (deg)', 'rain (mm)', 'raining (s)', 'sh (g/kg)', 
-                      'H2OC (mmol/mol)', 'rho (g/m**3)', 'Tdew (degC)', 'Tlog (degC)', 'CO2 (ppm)', 
-                      'PAR (umol/m2/s)', 'Tmax (degC)', 'Tmin (degC)', 'hour_sin', 'hour_cos']
-        
+        # Define channel names based on the CSV header (OT removed). Hour features appended last.
+        full_names = [
+            'p (mbar)', 'T (degC)', 'Tpot (K)', 'Tdew (degC)', 'rh (%)', 'VPmax (mbar)', 'VPact (mbar)',
+            'VPdef (mbar)', 'sh (g/kg)', 'H2OC (mmol/mol)', 'rho (g/m**3)', 'wv (m/s)', 'max. wv (m/s)',
+            'wd (deg)', 'rain (mm)', 'raining (s)', 'SWDR (W/m2)', 'PAR (umol/m2/s)', 'max. PAR (umol/m2/s)',
+            'Tlog (degC)', 'hour_sin', 'hour_cos'
+        ]
+
         return {
             'long_channel': {
-                'indices': list(range(23)),  # All 23 input channels
+                'indices': list(range(22)),  # All input channels for enc_in=22
                 'names': full_names,
-                'output_indices': [10, 1, 2, 7],  # rain (mm), T (degC), Tpot (K), wv (m/s) - targets for optimization
+                # Targets: rain (14), T (1), Tpot (2), wv (11)
+                'output_indices': [14, 1, 2, 11],
                 'description': 'Long channel predictors for rain, temperature, wind speed'
             },
             'short_channel': {
-                'indices': list(range(23)),  # All 23 input channels
+                'indices': list(range(22)),  # All input channels for enc_in=22
                 'names': full_names,
-                'output_indices': [11, 15, 8],  # raining (s), Tdew (degC), max. wv (m/s) - targets for optimization
+                # Targets: raining (15), Tdew (3), max. wv (12)
+                'output_indices': [15, 3, 12],
                 'description': 'Short channel predictors for raining duration, dew point, max wind'
             }
         }

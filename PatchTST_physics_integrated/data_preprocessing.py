@@ -19,7 +19,12 @@ def add_hour_of_day_features(input_path, output_path):
     """
     print(f"Loading original dataset from: {input_path}")
     df = pd.read_csv(input_path)
-    
+
+    # Remove unwanted columns (if present)
+    # Some CSV exports include an extra index or OT column; drop 'OT' when present
+    if 'OT' in df.columns:
+        df = df.drop(columns=['OT'])
+
     print(f"Original shape: {df.shape}")
     print(f"Original columns: {list(df.columns)}")
     
