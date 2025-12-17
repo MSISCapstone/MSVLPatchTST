@@ -50,41 +50,8 @@ def add_hour_of_day_features(input_path, output_path):
     print(f"\nHour feature statistics:")
     print(df[['hour_sin', 'hour_cos']].describe())
     
-    # Apply quantization to short_channel variables
-    # Short channel indices (after dropping OT): raining (15), Tdew (3), max. wv (12)
-    # Column names in order: date, p, T, Tpot, Tdew, rh, VPmax, VPact, VPdef, sh, H2OC, rho, wv, max. wv, wd, rain, raining, SWDR, PAR, max. PAR, Tlog, hour_sin, hour_cos
-    short_channel_cols = ['raining (s)', 'Tdew (degC)', 'max. wv (m/s)']
-    
-    print(f"\nApplying global quantization to short_channel variables...")
-    for col in short_channel_cols:
-        if col in df.columns:
-            values = df[col].values
-            
-            # Compute global percentiles
-            p10 = np.percentile(values, 10)
-            p50 = np.percentile(values, 50)
-            p90 = np.percentile(values, 90)
-            
-            # Create masks
-            is_bottom_10 = values <= p10
-            is_top_10 = values >= p90
-            is_middle = ~(is_bottom_10 | is_top_10)
-            
-            # Quantize middle values
-            quantized = values.copy()
-            middle_above_50 = is_middle & (values > p50)
-            middle_below_50 = is_middle & (values <= p50)
-            quantized[middle_above_50] = p90
-            quantized[middle_below_50] = p10
-            
-            df[col] = quantized
-            
-            print(f"  {col}:")
-            print(f"    p10={p10:.4f}, p50={p50:.4f}, p90={p90:.4f}")
-            print(f"    Quantized {np.sum(middle_below_50 | middle_above_50)} / {len(values)} values")
-    
     # Save enhanced dataset
     df.to_csv(output_path, index=False)
-    print(f"\n✓ Enhanced dataset with quantization saved to: {output_path}")
+    print(f"\n✓ Enhanced dataset saved to: {output_path}")
     
     return df

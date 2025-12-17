@@ -100,8 +100,8 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
                 
                 # Target variable losses
                 # Get the actual channel indices in the original 23-channel space
-                long_indices = args.channel_groups['long_channel']['output_indices']  # [14, 1, 2, 11]
-                short_indices = args.channel_groups['short_channel']['output_indices']  # [15, 3, 12]
+                long_indices = args.channel_groups['long_channel']['output_indices']  # [10, 1, 2, 7]
+                short_indices = args.channel_groups['short_channel']['output_indices']  # [11, 15, 8]
                 
                 long_loss = criterion(outputs[:, :, long_indices], batch_y[:, -args.pred_len:, long_indices])
                 short_loss = criterion(outputs[:, :, short_indices], batch_y[:, -args.pred_len:, short_indices])
