@@ -15,7 +15,7 @@ class PhysicsIntegratedConfig:
         self.root_path = './datasets/weather'
         self.data_path = 'weather_with_hour.csv'
         self.features = 'M'
-        self.target = 'OT'
+        self.target = 'T (degC)'  # Changed from 'OT' since that column was dropped
         self.freq = 't'  # minutely
         self.embed = 'timeF'
 
@@ -44,7 +44,7 @@ class PhysicsIntegratedConfig:
         self.channel_groups = self._define_channel_groups()
         self.patch_configs = {
             'long_channel': {'patch_len': 24, 'stride': 12, 'weight': 0.5},  # 50% overlap for smooth long-term trends
-            'short_channel': {'patch_len': 6, 'stride': 6, 'weight': 0.5}    # No overlap to capture rapid variations
+            'short_channel': {'patch_len': 12, 'stride': 6, 'weight': 0.5}    # No overlap to capture rapid variations
         }
 
         # Hour-of-day feature configuration (indices adjusted for enc_in=22)
