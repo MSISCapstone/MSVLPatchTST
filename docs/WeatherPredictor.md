@@ -2,6 +2,66 @@
 
 ## Original PatchTST Model Architecture
 
+Input Multivariate Time Series
+X ∈ ℝ[B × M × L]
+        │
+        ▼
++-----------------------+
+|   RevIN (optional)    |   ← per-sample, per-channel, over time
++-----------------------+
+        │
+        ▼
+Channel-wise Split
+(for each channel m = 1…M)
+        │
+        ▼
++-----------------------+
+| Instance Norm (IN)    |   ← channel-wise normalization
++-----------------------+
+        │
+        ▼
++-----------------------+
+|      Patching         |   ← split length-L series into N patches of size P
+|  X_p ∈ ℝ[N × P]       |
++-----------------------+
+        │
+        ▼
++-----------------------+
+| Linear Projection     |   ← W_p ∈ ℝ[P × D]
+| + Positional Embed    |   ← E_pos ∈ ℝ[N × D]
++-----------------------+
+        │
+        ▼
++===================================================+
+|        Transformer Encoder (shared weights)       |
+|                                                   |
+|  [ Multi-Head Self-Attention ]                    |
+|        + Residual + Norm                          |
+|                                                   |
+|  [ Feed-Forward Network ]                         |
+|        + Residual + Norm                          |
+|                                                   |
+|  (Repeated K times, e.g. K = 3)                   |
++===================================================+
+        │
+        ▼
++-----------------------+
+|   Flatten / Pooling   |
++-----------------------+
+        │
+        ▼
++-----------------------+
+|   Linear Prediction   |   ← horizon T
++-----------------------+
+        │
+        ▼
+Output Forecast
+Ŷ ∈ ℝ[B × M × T]
+        │
+        ▼
+Inverse RevIN (optional)
+
+
 ```mermaid
 graph TD
     A["Input Data<br/>7 Channels × 512 Time Steps"] --> B["RevIN Normalization"]

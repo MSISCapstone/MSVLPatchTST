@@ -7,10 +7,29 @@ class _ScaledDotProductAttention(nn.Module):
     """Scaled Dot-Product Attention"""
     
     def __init__(self, dropout=0.0):
+        """
+        _ScaledDotProductAttention.__init__
+        Purpose: Initializes the scaled dot-product attention module with dropout.
+        Input: dropout (float): Dropout probability for attention weights.
+        Output: None
+        """
         super().__init__()
         self.attn_dropout = nn.Dropout(dropout)
     
     def forward(self, query, key, value, attn_mask=None, key_padding_mask=None):
+        """
+        _ScaledDotProductAttention.forward
+        Purpose: Computes scaled dot-product attention mechanism.
+        Input: 
+            query: [bs, seq_len, d_model] - Query tensor
+            key: [bs, seq_len, d_model] - Key tensor  
+            value: [bs, seq_len, d_model] - Value tensor
+            attn_mask: [bs, seq_len, seq_len] optional - Attention mask
+            key_padding_mask: [bs, seq_len] optional - Key padding mask
+        Output: 
+            output: [bs, seq_len, d_model] - Attention output
+            attn_weights: [bs, seq_len, seq_len] - Attention weights
+        """
         # query, key, value: [bs, seq_len, d_model]
         d_k = query.size(-1)
         
@@ -35,6 +54,15 @@ class CustomMultiheadAttention(nn.Module):
     """Custom multi-head attention with specified structure"""
     
     def __init__(self, d_model=128, n_heads=8, dropout=0.0):
+        """
+        CustomMultiheadAttention.__init__
+        Purpose: Initializes custom multi-head attention module with Q/K/V projections and feed-forward.
+        Input: 
+            d_model (int): Model dimension
+            n_heads (int): Number of attention heads
+            dropout (float): Dropout probability
+        Output: None
+        """
         super().__init__()
         self.d_model = d_model
         self.n_heads = n_heads
@@ -64,6 +92,19 @@ class CustomMultiheadAttention(nn.Module):
         self.norm_attn = nn.LayerNorm(d_model)
     
     def forward(self, query, key, value, attn_mask=None, key_padding_mask=None):
+        """
+        CustomMultiheadAttention.forward
+        Purpose: Performs multi-head attention with custom feed-forward and normalization.
+        Input: 
+            query: [bs, seq_len, d_model] - Query tensor
+            key: [bs, seq_len, d_model] - Key tensor
+            value: [bs, seq_len, d_model] - Value tensor
+            attn_mask: [bs, seq_len, seq_len] optional - Attention mask
+            key_padding_mask: [bs, seq_len] optional - Key padding mask
+        Output: 
+            output: [bs, seq_len, d_model] - Attention output
+            attn_weights: [bs, seq_len, seq_len] - Attention weights
+        """
         # Apply projections
         Q = self.W_Q(query)
         K = self.W_K(key)
@@ -88,11 +129,25 @@ class Transpose(nn.Module):
     """Transpose module for sequential"""
     
     def __init__(self, dim0, dim1):
+        """
+        Transpose.__init__
+        Purpose: Initializes transpose module to swap dimensions in tensor.
+        Input: 
+            dim0 (int): First dimension to transpose
+            dim1 (int): Second dimension to transpose
+        Output: None
+        """
         super().__init__()
         self.dim0 = dim0
         self.dim1 = dim1
     
     def forward(self, x):
+        """
+        Transpose.forward
+        Purpose: Transposes specified dimensions of input tensor.
+        Input: x: [bs, ...] - Input tensor with arbitrary dimensions
+        Output: x: [bs, ...] - Transposed tensor with dim0 and dim1 swapped
+        """
         return x.transpose(self.dim0, self.dim1)
 
 
@@ -107,6 +162,23 @@ class PerChannelEncoder(nn.Module):
     def __init__(self, n_input_channels, n_output_channels, context_window, target_window, 
                  patch_len, stride, d_model=128, n_heads=8, 
                  dropout=0.2, head_dropout=0.0, padding_patch='end'):
+        """
+        PerChannelEncoder.__init__
+        Purpose: Initializes per-channel encoder for a group of weather channels with custom attention.
+        Input: 
+            n_input_channels (int): Number of input channels (including hour features)
+            n_output_channels (int): Number of output channels (weather only)
+            context_window (int): Input sequence length
+            target_window (int): Prediction sequence length
+            patch_len (int): Length of each patch
+            stride (int): Stride for patch creation
+            d_model (int): Model dimension
+            n_heads (int): Number of attention heads
+            dropout (float): Dropout probability
+            head_dropout (float): Head dropout probability
+            padding_patch (str): Padding strategy ('end')
+        Output: None
+        """
         super().__init__()
         
         self.n_input_channels = n_input_channels   # Includes hour features if integrated
@@ -146,11 +218,13 @@ class PerChannelEncoder(nn.Module):
         
     def forward(self, x, output_channel_mask):
         """
-        Args:
-            x: [bs, n_input_channels, seq_len] - includes hour features if integrated
-            output_channel_mask: list of bools, True for channels to output
-        Returns:
-            outputs: [bs, n_output_channels, pred_len] - only weather channels
+        PerChannelEncoder.forward
+        Purpose: Encodes input channels using per-channel attention and generates predictions for output channels.
+        Input: 
+            x: [bs, n_input_channels, seq_len] - Input tensor with all channels for this group
+            output_channel_mask: [n_input_channels] bool list - True for channels to output predictions
+        Output: 
+            outputs: [bs, n_output_channels, pred_len] - Predictions for output channels only
         """
         bs, n_ch, seq_len = x.shape
         
@@ -197,6 +271,16 @@ class CrossGroupAttention(nn.Module):
     - Temperature -> Convection -> Rain
     """
     def __init__(self, n_channels, d_model, n_heads=4, dropout=0.1):
+        """
+        CrossGroupAttention.__init__
+        Purpose: Initializes cross-group attention module for fusing long and short channel predictions.
+        Input: 
+            n_channels (int): Number of channels to process
+            d_model (int): Model dimension
+            n_heads (int): Number of attention heads
+            dropout (float): Dropout probability
+        Output: None
+        """
         super().__init__()
         self.n_channels = n_channels
         self.d_model = d_model
@@ -228,10 +312,10 @@ class CrossGroupAttention(nn.Module):
         
     def forward(self, x):
         """
-        Args:
-            x: [bs, pred_len, n_channels] - independent group predictions
-        Returns:
-            x: [bs, pred_len, n_channels] - cross-group refined predictions
+        CrossGroupAttention.forward
+        Purpose: Applies cross-group attention to fuse predictions from different channel groups.
+        Input: x: [bs, pred_len, n_channels] - Independent group predictions
+        Output: x: [bs, pred_len, n_channels] - Cross-group refined predictions
         """
         bs, pred_len, n_ch = x.shape
         
@@ -278,6 +362,12 @@ class PhysicsIntegratedPatchTST(nn.Module):
     - Only weather channels are predicted (hour features are input-only)
     """
     def __init__(self, configs):
+        """
+        PhysicsIntegratedPatchTST.__init__
+        Purpose: Initializes the complete physics-integrated PatchTST model with dual encoders and cross-group attention.
+        Input: configs - Configuration object with model parameters
+        Output: None
+        """
         super().__init__()
         
         self.seq_len = configs.seq_len
@@ -359,10 +449,10 @@ class PhysicsIntegratedPatchTST(nn.Module):
         
     def forward(self, x):
         """
-        Args:
-            x: [bs, seq_len, 23] - 21 weather + 2 hour features
-        Returns:
-            output: [bs, pred_len, 21] - only weather predictions
+        PhysicsIntegratedPatchTST.forward
+        Purpose: Performs forward pass through the physics-integrated PatchTST model with group-specific encoding and cross-group attention.
+        Input: x - [bs, seq_len, 23] tensor with 21 weather channels + 2 hour features
+        Output: output - [bs, pred_len, 21] tensor with predictions for all 21 weather channels
         """
         bs = x.shape[0]
         
