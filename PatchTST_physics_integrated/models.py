@@ -151,6 +151,135 @@ class Transpose(nn.Module):
         return x.transpose(self.dim0, self.dim1)
 
 
+class CrossChannelEncoder(nn.Module):
+    """Encoder that creates embeddings across all channels simultaneously.
+    
+    Instead of processing each channel independently, this encoder:
+    1. Patches the input across time for all channels
+    2. Creates shared embeddings that capture cross-channel dependencies
+    3. Uses attention to learn relationships between channels and time
+    
+    Benefits:
+    - Better capture inter-variable dependencies
+    - More parameter efficient
+    - Can learn shared temporal patterns across variables
+    """
+    def __init__(self, n_input_channels, n_output_channels, context_window, target_window,
+                 patch_len, stride, d_model=128, n_heads=8,
+                 dropout=0.2, head_dropout=0.0, padding_patch='end'):
+        """
+        CrossChannelEncoder.__init__
+        Purpose: Initializes cross-channel encoder that processes all channels together.
+        Input:
+            n_input_channels: Number of input channels
+            n_output_channels: Number of output channels to predict
+            context_window: Input sequence length
+            target_window: Prediction sequence length
+            patch_len: Length of each patch
+            stride: Stride for patching
+            d_model: Model dimension
+            n_heads: Number of attention heads
+            dropout: Dropout rate
+            head_dropout: Dropout for attention heads
+            padding_patch: Padding strategy ('end' or None)
+        Output: None
+        """
+        super().__init__()
+        self.n_input_channels = n_input_channels
+        self.n_output_channels = n_output_channels
+        self.context_window = context_window
+        self.target_window = target_window
+        self.patch_len = patch_len
+        self.stride = stride
+        self.d_model = d_model
+        self.padding_patch = padding_patch
+        
+        # Calculate number of patches
+        self.n_patches = (max(context_window, patch_len) - patch_len) // stride + 1
+        if padding_patch == 'end':
+            self.n_patches += 1
+        
+        # Patch embedding: projects [n_channels * patch_len] -> d_model
+        self.patch_embedding = nn.Linear(n_input_channels * patch_len, d_model)
+        
+        # Positional encoding for patches
+        self.pos_encoding = nn.Parameter(torch.randn(1, self.n_patches, d_model))
+        
+        # Channel encoding to help model distinguish channels
+        self.channel_encoding = nn.Parameter(torch.randn(1, n_input_channels, d_model))
+        
+        # Transformer encoder layers
+        self.encoder_layers = nn.ModuleList([
+            CustomMultiheadAttention(d_model=d_model, n_heads=n_heads, dropout=dropout)
+            for _ in range(3)
+        ])
+        
+        # Output projection: d_model -> n_output_channels * target_window
+        self.head = nn.Linear(d_model * self.n_patches, n_output_channels * target_window)
+        
+        self.dropout = nn.Dropout(dropout)
+        self.head_dropout = nn.Dropout(head_dropout)
+        
+    def forward(self, x, output_channel_mask):
+        """
+        CrossChannelEncoder.forward
+        Purpose: Forward pass with cross-channel patching and attention.
+        Input:
+            x: [bs, n_input_channels, seq_len] - Input tensor
+            output_channel_mask: List of bools indicating which channels to output
+        Output:
+            [bs, n_output_channels, target_window] - Predictions
+        """
+        bs, n_ch, seq_len = x.shape
+        
+        # Create patches: [bs, n_patches, n_channels * patch_len]
+        patches = []
+        for i in range(self.n_patches):
+            start = i * self.stride
+            end = start + self.patch_len
+            if end > seq_len:
+                if self.padding_patch == 'end':
+                    # Pad with zeros
+                    patch = torch.zeros(bs, n_ch, self.patch_len, device=x.device)
+                    available = seq_len - start
+                    if available > 0:
+                        patch[:, :, :available] = x[:, :, start:seq_len]
+                else:
+                    break
+            else:
+                patch = x[:, :, start:end]
+            
+            # Flatten channels and time: [bs, n_channels * patch_len]
+            patch = patch.reshape(bs, -1)
+            patches.append(patch)
+        
+        # Stack patches: [bs, n_patches, n_channels * patch_len]
+        x_patched = torch.stack(patches, dim=1)
+        
+        # Embed patches: [bs, n_patches, d_model]
+        x_embed = self.patch_embedding(x_patched)
+        
+        # Add positional encoding
+        x_embed = x_embed + self.pos_encoding
+        x_embed = self.dropout(x_embed)
+        
+        # Apply transformer encoder layers
+        for encoder_layer in self.encoder_layers:
+            x_embed, _ = encoder_layer(x_embed, x_embed, x_embed)  # Unpack tuple (output, attn_weights)
+        
+        # Flatten patches: [bs, n_patches * d_model]
+        x_flat = x_embed.reshape(bs, -1)
+        
+        # Project to output: [bs, n_output_channels * target_window]
+        output = self.head(x_flat)
+        output = self.head_dropout(output)
+        
+        # Reshape: [bs, n_output_channels, target_window]
+        output = output.reshape(bs, self.n_output_channels, self.target_window)
+        
+        return output
+
+
 class PerChannelEncoder(nn.Module):
     """Encoder for a group of channels with specific patch length.
     
@@ -377,6 +506,10 @@ class PhysicsIntegratedPatchTST(nn.Module):
         self.patch_configs = configs.patch_configs
         self.c_out = configs.c_out  # Output all 23 channels
         self.hour_indices = set(configs.hour_feature_indices)  # {21, 22}
+        self.use_cross_channel = configs.use_cross_channel_encoder  # New config option
+        
+        # Cross-group attention: disable if using cross-channel encoder (already captures dependencies)
+        self.use_cross_group_attn = configs.use_cross_group_attention and not self.use_cross_channel
         
         # RevIN for normalization (all input channels)
         self.revin = configs.revin
@@ -417,35 +550,51 @@ class PhysicsIntegratedPatchTST(nn.Module):
                 'n_output': len(actual_output_indices)
             }
             
-            self.encoders[group_name] = PerChannelEncoder(
-                n_input_channels=len(indices),
-                n_output_channels=len(actual_output_indices),
-                context_window=configs.seq_len,
-                target_window=configs.pred_len,
-                patch_len=patch_config['patch_len'],
-                stride=patch_config['stride'],
-                d_model=configs.d_model,
-                n_heads=configs.n_heads,
-                dropout=configs.dropout,
-                head_dropout=configs.head_dropout,
-                padding_patch=configs.padding_patch
-            )
+            # Choose encoder based on configuration
+            if self.use_cross_channel:
+                self.encoders[group_name] = CrossChannelEncoder(
+                    n_input_channels=len(indices),
+                    n_output_channels=len(actual_output_indices),
+                    context_window=configs.seq_len,
+                    target_window=configs.pred_len,
+                    patch_len=patch_config['patch_len'],
+                    stride=patch_config['stride'],
+                    d_model=configs.d_model,
+                    n_heads=configs.n_heads,
+                    dropout=configs.dropout,
+                    head_dropout=configs.head_dropout,
+                    padding_patch=configs.padding_patch
+                )
+            else:
+                self.encoders[group_name] = PerChannelEncoder(
+                    n_input_channels=len(indices),
+                    n_output_channels=len(actual_output_indices),
+                    context_window=configs.seq_len,
+                    target_window=configs.pred_len,
+                    patch_len=patch_config['patch_len'],
+                    stride=patch_config['stride'],
+                    d_model=configs.d_model,
+                    n_heads=configs.n_heads,
+                    dropout=configs.dropout,
+                    head_dropout=configs.head_dropout,
+                    padding_patch=configs.padding_patch
+                )
                 
         # Collect all target indices in order
         self.target_indices = []
         for group_name in self.channel_groups.keys():
             self.target_indices.extend(self.group_info[group_name]['output_indices'])
         
-        # Cross-group attention layer
-        self.cross_group_attn = CrossGroupAttention(
-            n_channels=self.c_out,  # Dynamic
-            d_model=configs.d_model // 2,
-            n_heads=4,
-            dropout=configs.dropout
-        )
-        
-        # Learnable mixing weight
-        self.cross_group_weight = nn.Parameter(torch.tensor(0.3))
+        # Cross-group attention layer (only if enabled)
+        if self.use_cross_group_attn:
+            self.cross_group_attn = CrossGroupAttention(
+                n_channels=self.c_out,  # Dynamic
+                d_model=configs.d_model // 2,
+                n_heads=4,
+                dropout=configs.dropout
+            )
+            # Learnable mixing weight
+            self.cross_group_weight = nn.Parameter(torch.tensor(0.3))
         
     def forward(self, x):
         """
@@ -484,12 +633,12 @@ class PhysicsIntegratedPatchTST(nn.Module):
         # Permute to [bs, pred_len, c_out]
         output = all_outputs.permute(0, 2, 1)
         
-        # Step 2: Cross-group refinement
-        cross_output = self.cross_group_attn(output)
-        
-        # Blend: original group-specific + cross-group refined
-        alpha = torch.sigmoid(self.cross_group_weight)
-        output = (1 - alpha) * output + alpha * cross_output
+        # Step 2: Cross-group refinement (only if enabled)
+        if self.use_cross_group_attn:
+            cross_output = self.cross_group_attn(output)
+            # Blend: original group-specific + cross-group refined
+            alpha = torch.sigmoid(self.cross_group_weight)
+            output = (1 - alpha) * output + alpha * cross_output
         
         # Step 3: RevIN denormalization
         if self.revin:

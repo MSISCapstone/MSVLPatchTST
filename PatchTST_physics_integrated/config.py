@@ -15,7 +15,7 @@ class PhysicsIntegratedConfig:
         self.root_path = './datasets/weather'
         self.data_path = 'weather_with_hour.csv'
         self.features = 'M'
-        self.target = 'OT'
+        self.target = 'T (degC)'  # Nominal target (actual predictions are multivariate)
         self.freq = 't'  # minutely
         self.embed = 'timeF'
 
@@ -43,12 +43,20 @@ class PhysicsIntegratedConfig:
         # Variable-length patching configuration (Predictor-Based grouping)
         self.channel_groups = self._define_channel_groups()
         self.patch_configs = {
-            'long_channel': {'patch_len': 24, 'stride': 12, 'weight': 0.5},  # 50% overlap for smooth long-term trends
-            'short_channel': {'patch_len': 6, 'stride': 6, 'weight': 0.5}    # No overlap to capture rapid variations
+            'short_channel': {'patch_len': 24, 'stride': 12, 'weight': 0.5},  # 50% overlap for smooth long-term trends
+            'long_channel': {'patch_len': 6, 'stride': 6, 'weight': 0.5}    # No overlap to capture rapid variations
         }
+        
+        # Max pooling for long channel preprocessing
+        self.long_channel_pool_kernel = 4
+        self.long_channel_pool_stride = 1
 
         # Hour-of-day feature configuration (indices adjusted for enc_in=22)
         self.hour_feature_indices = [20, 21]  # hour_sin, hour_cos
+
+        # Encoder architecture
+        self.use_cross_channel_encoder = False  # Set to True to use cross-channel embeddings
+        self.use_cross_group_attention = True   # Cross-group attention (auto-disabled if cross-channel encoder is used)
 
         # Legacy PatchTST params (for compatibility)
         self.padding_patch = 'end'
@@ -99,18 +107,18 @@ class PhysicsIntegratedConfig:
         ]
 
         return {
-            'long_channel': {
-                'indices': list(range(22)),  # All input channels for enc_in=22
-                'names': full_names,
-                # Targets: rain (14), T (1), Tpot (2), wv (11)
-                'output_indices': [14, 1, 2, 11],
-                'description': 'Long channel predictors for rain, temperature, wind speed'
-            },
             'short_channel': {
                 'indices': list(range(22)),  # All input channels for enc_in=22
                 'names': full_names,
-                # Targets: raining (15), Tdew (3), max. wv (12)
-                'output_indices': [15, 3, 12],
-                'description': 'Short channel predictors for raining duration, dew point, max wind'
+                # Targets: air pressure (0), rainfall amount (14), temperature (1)
+                'output_indices': [0, 14, 1],
+                'description': 'Short channel predictors for pressure, rainfall, temperature'
+            },
+            'long_channel': {
+                'indices': list(range(22)),  # All input channels for enc_in=22
+                'names': full_names,
+                # Targets: max wind speed (12), rainfall duration (15), wind speed (11)
+                'output_indices': [12, 15, 11],
+                'description': 'Long channel predictors for max wind, rainfall duration, wind speed'
             }
         }
