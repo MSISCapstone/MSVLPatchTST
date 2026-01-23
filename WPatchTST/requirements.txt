@@ -1,0 +1,11 @@
+%%writefile requirements.txt
+numpy
+pandas
+matplotlib
+scikit-learn
+tqdm
+einops
+tensorboard
+torch
+torchvision
+torchaudio
