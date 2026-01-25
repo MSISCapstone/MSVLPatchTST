@@ -33,7 +33,7 @@ if __name__ == '__main__':
     parser.add_argument('--label_len', type=int, default=48, help='start token length')
     parser.add_argument('--pred_len', type=int, default=96, help='prediction sequence length')
 
-
+    
     # DLinear
     #parser.add_argument('--individual', action='store_true', default=False, help='DLinear: a linear layer for each variate(channel) individually')
 
@@ -57,6 +57,14 @@ if __name__ == '__main__':
     parser.add_argument('--patch_strides', type=str, default='8', help='comma-separated strides for multi-scale (e.g., "3,6,12"); ignored if multi_scale=0')
     parser.add_argument('--patch_weights', type=str, default='1.0', help='comma-separated weights for multi-scale fusion (e.g., "0.2,0.5,0.3"); auto-normalized; ignored if multi_scale=0')
 
+
+    # Short Patch Config
+    parser.add_argument('--short_patch_len', type=int, default=6)
+    parser.add_argument('--short_stride', type=int, default=3)
+    parser.add_argument('--short_idx', type=str, default="")
+
+
+    
     # Formers 
     parser.add_argument('--embed_type', type=int, default=0, help='0: default 1: value embedding + temporal embedding + positional embedding 2: value embedding + temporal embedding 3: value embedding + positional embedding 4: value embedding')
     parser.add_argument('--enc_in', type=int, default=7, help='encoder input size') # DLinear with --individual, use this hyperparameter as the number of channels
