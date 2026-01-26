@@ -43,6 +43,11 @@ do
       --patch_lengths $patch_lengths \
       --patch_strides $patch_strides \
       --patch_weights $patch_weights \
+      
+      --short_patch_len 6 \      #Short Patch Config VV
+      --short_stride 3 \         #Short Patch Config VV
+      --short_idx "13,16" \      #Short Patch Config VV
+      
       --e_layers 3 \
       --n_heads 16 \
       --d_model 128 \
