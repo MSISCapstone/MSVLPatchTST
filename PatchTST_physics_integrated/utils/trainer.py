@@ -10,7 +10,8 @@ import torch.nn as nn
 import numpy as np
 import time
 import os
-from .training_utils import validate, adjust_learning_rate
+from .training_utils import validate
+
 
 
 def _safe_torch_load(path, device):
@@ -263,8 +264,9 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
             break
 
         # ---------- Adjust learning rate ----------
-        if args.lradj != 'TST':
-            adjust_learning_rate(optimizer, scheduler, epoch + 1, args)
+        if scheduler is not None:
+            scheduler.step()
+
 
     print("=" * 70)
     print("Training completed!")
