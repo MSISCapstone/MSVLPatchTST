@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from PatchTST_physics_integrated.models.stage4_model import Stage4PhysicsModel
 
 class _ScaledDotProductAttention(nn.Module):
     """Scaled Dot-Product Attention"""
