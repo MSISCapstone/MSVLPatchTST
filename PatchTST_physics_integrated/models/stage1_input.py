@@ -1,6 +1,9 @@
 import torch.nn as nn
 from layers.revin import RevIN
 from utils.time_features import add_hour_features
+from PatchTST_physics_integrated.layers.revin import RevIN
+from PatchTST_physics_integrated.utils.time_features import add_hour_features
+
 
 #  PROPOSED CHANNEL GROUPING (DATA-DRIVEN)
 LONG_CHANNELS = [
