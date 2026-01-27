@@ -27,7 +27,7 @@ class AlignShortToLong(nn.Module):
         x = x.reshape(B, C, D, Np_long).permute(0, 1, 3, 2)  # [B, C, Np_long, D]
         return x
 
-    class CrossGroupAttentionBridge(nn.Module):
+class CrossGroupAttentionBridge(nn.Module):
     """
     Bi-directional cross attention between long and short channel groups
     at aligned patch resolution.
