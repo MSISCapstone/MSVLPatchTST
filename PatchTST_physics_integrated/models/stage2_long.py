@@ -36,4 +36,68 @@ class ReplicationPad1dPatchify(nn.Module):
         patches = x.unfold(dimension=-1, size=self.patch_len, step=self.stride)
 
         return patches
+    from layers.PatchTST_backbone import PatchTST_backbone
+
+class LongChannelEncoder(nn.Module):
+    """
+    Long-channel encoder:
+    ReplicationPad1d -> Patchify -> Patch Embedding -> PatchTST backbone
+    """
+    def __init__(
+        self,
+        patch_len: int,
+        stride: int,
+        c_long: int,
+        d_model: int = 128,
+        n_heads: int = 8,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        self.patchify = ReplicationPad1dPatchify(patch_len, stride)
+
+        # Linear projection: patch_len -> d_model
+        self.patch_embed = nn.Linear(patch_len, d_model)
+
+        # PatchTST backbone (channel-independent)
+        self.encoder = PatchTST_backbone(
+            c_in=1,                  # single channel at a time
+            patch_len=patch_len,
+            stride=stride,
+            d_model=d_model,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            dropout=dropout,
+        )
+
+        self.c_long = c_long
+        self.d_model = d_model
+
+    def forward(self, x_long):
+        """
+        x_long: [B, L, C_long]
+        return: H_long [B, C_long, Np, d_model]
+        """
+        # Patchify
+        patches = self.patchify(x_long)   # [B, C_long, Np, patch_len]
+
+        B, C, Np, P = patches.shape
+
+        #  Prepare for embedding: merge B & C
+        patches = patches.reshape(B * C, Np, P)   # [B*C, Np, patch_len]
+
+        #Patch embedding
+        tokens = self.patch_embed(patches)         # [B*C, Np, d_model]
+
+        # Transformer encoder (PatchTST)
+        enc = self.encoder(tokens)                  # [B*C, Np, d_model]
+
+        # Restore channel dimension
+        H_long = enc.reshape(B, C, Np, self.d_model)
+
+        return H_long
+
+
+
 
