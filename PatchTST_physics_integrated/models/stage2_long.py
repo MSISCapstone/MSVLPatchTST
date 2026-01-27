@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from PatchTST_physics_integrated.layers.PatchTST_backbone import PatchTST_backbone
+
 class ReplicationPad1dPatchify(nn.Module):
     """
     Long-channel path: ReplicationPad1d -> unfold into patches.
@@ -36,7 +38,9 @@ class ReplicationPad1dPatchify(nn.Module):
         patches = x.unfold(dimension=-1, size=self.patch_len, step=self.stride)
 
         return patches
-    from layers.PatchTST_backbone import PatchTST_backbone
+
+
+
 
 class LongChannelEncoder(nn.Module):
     """
