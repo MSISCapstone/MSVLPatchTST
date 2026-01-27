@@ -15,5 +15,4 @@ class WeatherDataset(Dataset):
         h = self.hours[idx : idx + self.L]
         return torch.from_numpy(x), torch.from_numpy(h)
 
-X_all = df[feature_cols].astype("float32").values   # [N,20]
-hour_all = df["date"].dt.hour.astype("int64").values
+
