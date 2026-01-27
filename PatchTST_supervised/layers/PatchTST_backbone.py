@@ -8,9 +8,10 @@ from torch import Tensor
 import torch.nn.functional as F
 import numpy as np
 
-#from collections import OrderedDict
-from layers.PatchTST_layers import *
-from layers.RevIN import RevIN
+#for wpatch
+from PatchTST_supervised.layers.PatchTST_layers import *
+from PatchTST_supervised.layers.RevIN import RevIN
+
 
 # Cell
 class PatchTST_backbone(nn.Module):
