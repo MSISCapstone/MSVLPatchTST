@@ -137,7 +137,8 @@ class LongChannelTransformer(nn.Module):
         super().__init__()
 
         # Import INSIDE to avoid top-level import errors
-        from PatchTST_physics_integrated.layers.PatchTST_backbone import PatchTST_backbone
+        from PatchTST_supervised.layers.PatchTST_backbone import PatchTST_backbone
+
 
         self.encoder = PatchTST_backbone(
             c_in=1,              # channel-independent
