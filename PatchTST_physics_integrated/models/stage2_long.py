@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from PatchTST_physics_integrated.layers.PatchTST_backbone import PatchTST_backbone
 
 class ReplicationPad1dPatchify(nn.Module):
     """
