@@ -58,7 +58,7 @@ class LongChannelEncoder(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        from PatchTST_physics_integrated.layers.PatchTST_backbone import PatchTST_backbone
+       
         self.patchify = ReplicationPad1dPatchify(patch_len, stride)
 
         # Linear projection: patch_len -> d_model
