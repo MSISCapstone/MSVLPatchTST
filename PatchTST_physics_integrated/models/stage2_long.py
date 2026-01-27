@@ -102,5 +102,21 @@ class LongChannelEncoder(nn.Module):
         return H_long
 
 
+class LongPatchEmbedding(nn.Module):
+    """
+    Converts long-channel patches into embedding tokens
+    Input : patches [B, C_long, Np, patch_len]
+    Output: tokens  [B, C_long, Np, d_model]
+    """
+    def __init__(self, patch_len: int, d_model: int):
+        super().__init__()
+        self.proj = nn.Linear(patch_len, d_model)
+
+    def forward(self, patches):
+        B, C, Np, P = patches.shape
+        patches = patches.reshape(B * C * Np, P)
+        tokens = self.proj(patches)
+        tokens = tokens.reshape(B, C, Np, -1)
+        return tokens
 
 
