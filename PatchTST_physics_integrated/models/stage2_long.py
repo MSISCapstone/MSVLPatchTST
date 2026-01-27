@@ -120,3 +120,49 @@ class LongPatchEmbedding(nn.Module):
         return tokens
 
 
+
+class LongChannelTransformer(nn.Module):
+    """
+    Applies PatchTST Transformer encoder to long-channel tokens.
+    Input : tokens [B, C_long, Np, d_model]
+    Output: H_long [B, C_long, Np, d_model]
+    """
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int = 8,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        # Import INSIDE to avoid top-level import errors
+        from PatchTST_physics_integrated.layers.PatchTST_backbone import PatchTST_backbone
+
+        self.encoder = PatchTST_backbone(
+            c_in=1,              # channel-independent
+            d_model=d_model,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            dropout=dropout,
+        )
+
+        self.d_model = d_model
+
+    def forward(self, tokens):
+        """
+        tokens: [B, C, Np, d_model]
+        """
+        B, C, Np, D = tokens.shape
+
+        # Merge batch & channel
+        x = tokens.reshape(B * C, Np, D)
+
+        # Transformer encoding
+        x = self.encoder(x)   # [B*C, Np, d_model]
+
+        # Restore shape
+        H_long = x.reshape(B, C, Np, D)
+        return H_long
+
+
