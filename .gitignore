@@ -467,8 +467,10 @@ $RECYCLE.BIN/
 */test_results/*
 */results/*
 /logs/
+/output/
 
 # End of https://www.toptal.com/developers/gitignore/api/emacs,jetbrains+all,jupyternotebooks,linux,macos,microsoftoffice,notepadpp,python,tortoisegit,vim,visualstudiocode,windows
 */result.txt
 datasets/weather/weather_with_hour.csv
 checkpoints_physics_integrated
+PatchTST_supervised_to_delete

@@ -129,12 +129,6 @@ class Exp_Main(Exp_Basic):
 
             self.model.train()
             epoch_time = time.time()
-            
-            # Print epoch header
-            print(f"\n{'='*80}")
-            print(f"Epoch [{epoch + 1}/{self.args.train_epochs}] - In Progress")
-            print(f"{'='*80}")
-            
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
@@ -181,10 +175,10 @@ class Exp_Main(Exp_Basic):
                     train_loss.append(loss.item())
 
                 if (i + 1) % 100 == 0:
-                    print("\t  Batch [{}/{}] | Loss: {:.7f}".format(i + 1, train_steps, loss.item()))
+                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
                     speed = (time.time() - time_now) / iter_count
                     left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
-                    print('\t  Speed: {:.4f}s/iter | ETA: {:.1f}s'.format(speed, left_time))
+                    print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
                     iter_count = 0
                     time_now = time.time()
 
@@ -200,18 +194,16 @@ class Exp_Main(Exp_Basic):
                     adjust_learning_rate(model_optim, scheduler, epoch + 1, self.args, printout=False)
                     scheduler.step()
 
-            epoch_duration = time.time() - epoch_time
+            print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
 
-            print(f"Epoch [{epoch + 1}/{self.args.train_epochs}] Completed in {epoch_duration:.2f}s")
-            print(f"  Train Loss: {train_loss:.7f} | Vali Loss: {vali_loss:.7f} | Test Loss: {test_loss:.7f}")
-            print(f"{'='*80}")
-            
+            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                epoch + 1, train_steps, train_loss, vali_loss, test_loss))
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
-                print("Early stopping triggered")
+                print("Early stopping")
                 break
 
             if self.args.lradj != 'TST':
