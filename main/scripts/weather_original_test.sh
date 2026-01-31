@@ -69,22 +69,24 @@ fi
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$GIT_REPO_ROOT/logs/LongForecasting"
 
-# Run test-only inference with sliding window prediction (4 iterations x 96 = 384 total steps)
-# Each prediction uses REAL historical data (not previous predictions)
-# Step 1: Input [0:336]    → Predict [336:432]
-# Step 2: Input [96:432]   → Predict [432:528]
-# Step 3: Input [192:528]  → Predict [528:624]
-# Step 4: Input [288:624]  → Predict [624:720]
+# Run test-only inference with sliding window prediction
+# 4 samples with stride=pred_len, giving 4 x 96 = 384 total predicted timesteps
+# Each prediction uses 336 lookback to predict next 96 steps (non-overlapping)
+# Sample 0: [0:336]   → [336:432]
+# Sample 1: [96:432]  → [432:528]
+# Sample 2: [192:528] → [528:624]
+# Sample 3: [288:624] → [624:720]
 echo ""
 echo "Running Original PatchTST inference using test set..."
-echo "Sliding window prediction: 4 iterations x 96 steps = 384 total steps"
-echo "Each prediction uses real 336-step lookback window"
+echo "Sliding window: stride=$pred_len, 4 samples x $pred_len steps = $((4 * pred_len)) total predicted timesteps"
 (cd "$GIT_REPO_ROOT/PatchTST_supervised" && \
   python -u run_longExp.py \
     --random_seed $random_seed \
     --is_training 0 \
     --iterative \
-    --num_iterations 4 \
+    --num_iterations 1 \
+    --max_samples 4 \
+    --window_stride $pred_len \
     --root_path "$root_path_name" \
     --data_path "$data_path_name" \
     --model_id "$model_id" \

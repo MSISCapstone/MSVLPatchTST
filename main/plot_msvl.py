@@ -165,11 +165,12 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
     """Save per-feature metrics and create prediction plots."""
     os.makedirs(out_dir, exist_ok=True)
 
+    num_samples = preds.shape[0]
     D = preds.shape[-1]
-    actual_pred_len = preds.shape[1]  # Actual prediction length from data (may be 384 for iterative)
-    true_len = trues.shape[1]  # Ground truth length (typically 96)
+    actual_pred_len = preds.shape[1]  # Actual prediction length from data
+    true_len = trues.shape[1]  # Ground truth length
     
-    print(f"Predictions shape: {preds.shape} (actual pred_len={actual_pred_len})")
+    print(f"Predictions shape: {preds.shape} (num_samples={num_samples}, pred_len={actual_pred_len})")
     print(f"Ground truth shape: {trues.shape} (true_len={true_len})")
     
     # For metrics, use only the overlapping portion (where we have ground truth)
@@ -201,7 +202,7 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
     metrics_df.to_csv(Path(out_dir) / 'per_feature_metrics.csv', index=False)
     print(f"Saved per-feature metrics to {out_dir}/per_feature_metrics.csv")
 
-    # Create 2x3 plot grid for selected features
+    # Create 2x3 plot grid for selected features - CONTINUOUS TIME SERIES
     feature_indices = []
     for f in PLOT_ORDER:
         if f in data_columns:
@@ -212,51 +213,45 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
     fig, axes = plt.subplots(2, 3, figsize=(18, 10), constrained_layout=True)
     axes = axes.flatten()
 
+    # Total timesteps = num_samples * pred_len (e.g., 4 * 96 = 384)
+    total_timesteps = num_samples * actual_pred_len
+
     for ax, feat_name, feat_idx in zip(axes, PLOT_ORDER, feature_indices):
         if feat_idx is None or feat_idx >= preds.shape[-1]:
             ax.text(0.5, 0.5, f'Feature not found: {feat_name}', ha='center', va='center')
             ax.set_title(feat_name)
             continue
         
-        p = preds[..., feat_idx]  # Full predictions (384 steps)
-        t = trues[..., feat_idx]  # Ground truth (96 steps)
+        p = preds[..., feat_idx]  # [num_samples, pred_len]
+        t = trues[..., feat_idx]  # [num_samples, pred_len]
         
-        # Mean across samples for predictions (full length)
-        mean_p = np.nanmean(p, axis=0)
-        std_p = np.nanstd(p, axis=0)
+        # Flatten to continuous time series: [num_samples * pred_len]
+        # Each sample's 96 predictions are consecutive in time
+        continuous_pred = p.flatten()  # All 384 timesteps
+        continuous_true = t.flatten()  # All 384 timesteps
         
-        # Mean across samples for ground truth (shorter length)
-        mean_t = np.nanmean(t, axis=0)
-        std_t = np.nanstd(t, axis=0)
+        # Time axis
+        x_axis = np.arange(total_timesteps)
         
-        # Compute metrics on overlapping portion
-        p_overlap = p[:, :true_len]
-        mae = MAE(p_overlap, t)
-        mse = MSE(p_overlap, t)
+        # Compute metrics
+        mae = MAE(p, t)
+        mse = MSE(p, t)
 
-        # Plot full prediction length
-        x_pred = np.arange(actual_pred_len)
-        x_true = np.arange(true_len)
+        # Plot continuous time series
+        ax.plot(x_axis, continuous_true, label='Ground Truth', linewidth=1.5, color='blue', alpha=0.8)
+        ax.plot(x_axis, continuous_pred, label='Prediction', linewidth=1.5, color='orange', alpha=0.8)
         
-        # Plot ground truth (shorter)
-        ax.fill_between(x_true, mean_t - std_t, mean_t + std_t, alpha=0.2, color='blue')
-        ax.plot(x_true, mean_t, label=f'Ground Truth ({true_len} steps)', linewidth=2, color='blue')
+        # Add vertical lines at sample boundaries
+        for i in range(1, num_samples):
+            ax.axvline(x=i * actual_pred_len, color='gray', linestyle='--', alpha=0.3)
         
-        # Plot predictions (full 384 steps)
-        ax.fill_between(x_pred, mean_p - std_p, mean_p + std_p, alpha=0.2, color='orange')
-        ax.plot(x_pred, mean_p, label=f'Prediction ({actual_pred_len} steps)', linewidth=2, color='orange')
-        
-        # Add vertical line at the boundary between ground truth and extrapolation
-        if actual_pred_len > true_len:
-            ax.axvline(x=true_len, color='red', linestyle='--', alpha=0.5, label='GT boundary')
-        
-        ax.set_title(f"{feat_name}\nMAE={mae:.4f}, MSE={mse:.4f} (first {true_len} steps)")
+        ax.set_title(f"{feat_name}\nMAE={mae:.4f}, MSE={mse:.4f}")
         ax.legend(loc='upper right', fontsize=8)
-        ax.set_xlabel('Prediction Horizon (timesteps)')
-        ax.set_ylabel('Value')
+        ax.set_xlabel('Timestep')
+        ax.set_ylabel('Value (normalized)')
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle(f'MSVLPatchTST Weather Predictions (seq_len={seq_len}, total_pred={actual_pred_len})', fontsize=14)
+    fig.suptitle(f'MSVLPatchTST Weather Predictions - {total_timesteps} Timesteps\n({num_samples} samples x {actual_pred_len} steps, seq_len={seq_len})', fontsize=14)
     fig_file = Path(out_dir) / f'prediction_grid_sl{seq_len}_pl{actual_pred_len}.png'
     fig.savefig(fig_file, bbox_inches='tight', dpi=150)
     plt.close(fig)
@@ -266,21 +261,21 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
     with open(Path(out_dir) / 'summary.txt', 'w') as fh:
         fh.write('MSVLPatchTST Test Results Summary\n')
         fh.write('=' * 60 + '\n\n')
-        fh.write(f'Sequence Length: {seq_len}\n')
-        fh.write(f'Total Prediction Length: {actual_pred_len}\n')
-        fh.write(f'Ground Truth Length: {true_len}\n')
-        fh.write(f'Number of test samples: {preds.shape[0]}\n')
+        fh.write(f'Sequence Length (lookback): {seq_len}\n')
+        fh.write(f'Prediction Length per sample: {actual_pred_len}\n')
+        fh.write(f'Number of samples: {num_samples}\n')
+        fh.write(f'Total predicted timesteps: {total_timesteps}\n')
         fh.write(f'Number of features: {D}\n\n')
-        fh.write('Per-feature Metrics (computed on first {true_len} steps):\n')
+        fh.write(f'Per-feature Metrics:\n')
         fh.write('-' * 60 + '\n')
         fh.write(metrics_df.to_string(index=False))
         fh.write('\n\n')
         
-        # Overall metrics (on overlapping portion)
+        # Overall metrics
         overall_mae = MAE(preds_for_metrics, trues_for_metrics)
         overall_mse = MSE(preds_for_metrics, trues_for_metrics)
         overall_rmse = RMSE(preds_for_metrics, trues_for_metrics)
-        fh.write(f'Overall Metrics (first {true_len} steps with ground truth):\n')
+        fh.write(f'Overall Metrics:\n')
         fh.write('-' * 60 + '\n')
         fh.write(f'MAE: {overall_mae:.6f}\n')
         fh.write(f'MSE: {overall_mse:.6f}\n')

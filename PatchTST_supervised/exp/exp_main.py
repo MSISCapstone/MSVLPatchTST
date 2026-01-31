@@ -337,26 +337,29 @@ class Exp_Main(Exp_Basic):
         print(f'Saved ground truth shape: {trues.shape}')
         return
 
-    def test_sliding_window(self, setting, test=0, num_iterations=4):
+    def test_sliding_window(self, setting, test=0, num_iterations=1, max_samples=None, window_stride=96):
         """
-        Sliding window multi-step prediction test.
+        Sliding window prediction test with configurable stride.
         
-        Each iteration uses REAL historical data (not previous predictions) to predict 96 steps.
-        The prediction windows are consecutive, covering num_iterations * pred_len total steps.
+        Args:
+            setting: Experiment setting string
+            test: Whether to load checkpoint (1) or use current model (0)
+            num_iterations: Number of prediction iterations per sample (default: 1)
+            max_samples: Maximum number of samples to use (default: all)
+            window_stride: Stride between sliding windows (default: 96 for non-overlapping)
         
-        Example with num_iterations=4, seq_len=336, pred_len=96:
-            Step 1: Input [0:336]    → Predict [336:432]   (ground truth available)
-            Step 2: Input [96:432]   → Predict [432:528]   (ground truth available)
-            Step 3: Input [192:528]  → Predict [528:624]   (ground truth available)
-            Step 4: Input [288:624]  → Predict [624:720]   (ground truth available)
+        Example with window_stride=96, seq_len=336, pred_len=96, max_samples=4:
+            Sample 0: Input [0:336]   → Predict [336:432]
+            Sample 1: Input [96:432]  → Predict [432:528]
+            Sample 2: Input [192:528] → Predict [528:624]
+            Sample 3: Input [288:624] → Predict [624:720]
         """
         test_data, test_loader = self._get_data(flag='test')
         pred_len = self.args.pred_len
         seq_len = self.args.seq_len
-        total_pred_len = num_iterations * pred_len
         
-        print(f'\nSliding window prediction: {num_iterations} iterations x {pred_len} steps = {total_pred_len} total steps')
-        print(f'Each prediction uses real {seq_len}-step lookback window')
+        print(f'\nSliding window prediction with stride={window_stride}')
+        print(f'Each sample: {seq_len}-step lookback → {pred_len}-step prediction')
         
         if test:
             print('loading model')
@@ -373,14 +376,21 @@ class Exp_Main(Exp_Basic):
         
         total_len = len(data_x)
         
-        # Calculate how many complete sliding window sequences we can create
-        required_len = seq_len + num_iterations * pred_len
-        num_samples = total_len - required_len + 1
+        # Calculate how many samples we can create with the given stride
+        required_len = seq_len + pred_len
+        max_possible_samples = (total_len - required_len) // window_stride + 1
         
-        if num_samples <= 0:
+        if max_possible_samples <= 0:
             raise ValueError(f"Dataset too short. Need {required_len} timesteps, have {total_len}")
         
-        print(f"Total data length: {total_len}, Creating {num_samples} sliding window samples")
+        # Apply max_samples limit if specified
+        num_samples = max_possible_samples
+        if max_samples is not None and max_samples > 0:
+            num_samples = min(num_samples, max_samples)
+        
+        print(f"Total data length: {total_len}")
+        print(f"Creating {num_samples} samples (stride={window_stride}, max_possible={max_possible_samples})")
+        print(f"Total predicted timesteps: {num_samples * pred_len}")
         
         f_dim = -1 if self.args.features == 'MS' else 0
         n_features = data_y.shape[1] if f_dim == 0 else 1
@@ -391,75 +401,55 @@ class Exp_Main(Exp_Basic):
         self.model.eval()
         with torch.no_grad():
             for sample_idx in range(num_samples):
-                iteration_preds = []
-                iteration_trues = []
+                # Calculate the start position for this sample's input window
+                input_start = sample_idx * window_stride
+                input_end = input_start + seq_len
                 
-                for iteration in range(num_iterations):
-                    # Calculate the start position for this iteration's input window
-                    input_start = sample_idx + iteration * pred_len
-                    input_end = input_start + seq_len
-                    
-                    # Calculate the target position (what we're predicting)
-                    target_start = input_end
-                    target_end = target_start + pred_len
-                    
-                    if target_end > total_len:
-                        break
-                    
-                    # Get input sequence
-                    seq_x = data_x[input_start:input_end]  # [seq_len, channels]
-                    seq_x = torch.FloatTensor(seq_x).unsqueeze(0).to(self.device)  # [1, seq_len, channels]
-                    
-                    # Get ground truth
-                    if f_dim == 0:
-                        true_y = data_y[target_start:target_end, :]  # [pred_len, channels]
-                    else:
-                        true_y = data_y[target_start:target_end, -1:]  # [pred_len, 1] for MS
-                    
-                    # Forward pass
-                    if 'Linear' in self.args.model or 'TST' in self.args.model:
-                        outputs = self.model(seq_x)
-                    else:
-                        # For encoder-decoder models, need marks
-                        # This simplified version assumes PatchTST
-                        outputs = self.model(seq_x)
-                    
-                    pred = outputs[:, -pred_len:, f_dim:].cpu().numpy()[0]  # [pred_len, features]
-                    
-                    iteration_preds.append(pred)
-                    iteration_trues.append(true_y)
+                # Calculate the target position (what we're predicting)
+                target_start = input_end
+                target_end = target_start + pred_len
                 
-                if len(iteration_preds) == num_iterations:
-                    full_pred = np.concatenate(iteration_preds, axis=0)  # [total_pred_len, features]
-                    full_true = np.concatenate(iteration_trues, axis=0)  # [total_pred_len, features]
-                    
-                    all_preds.append(full_pred)
-                    all_trues.append(full_true)
+                if target_end > total_len:
+                    break
                 
-                if sample_idx % 1000 == 0:
+                # Get input sequence
+                seq_x = data_x[input_start:input_end]  # [seq_len, channels]
+                seq_x = torch.FloatTensor(seq_x).unsqueeze(0).to(self.device)  # [1, seq_len, channels]
+                
+                # Get ground truth
+                if f_dim == 0:
+                    true_y = data_y[target_start:target_end, :]  # [pred_len, channels]
+                else:
+                    true_y = data_y[target_start:target_end, -1:]  # [pred_len, 1] for MS
+                
+                # Forward pass
+                if 'Linear' in self.args.model or 'TST' in self.args.model:
+                    outputs = self.model(seq_x)
+                else:
+                    outputs = self.model(seq_x)
+                
+                pred = outputs[:, -pred_len:, f_dim:].cpu().numpy()[0]  # [pred_len, features]
+                
+                all_preds.append(pred)
+                all_trues.append(true_y)
+                
+                if sample_idx % 100 == 0:
                     print(f"  Processed {sample_idx}/{num_samples} samples...")
         
-        all_preds = np.array(all_preds)  # [N, total_pred_len, features]
-        all_trues = np.array(all_trues)  # [N, total_pred_len, features]
+        all_preds = np.array(all_preds)  # [N, pred_len, features]
+        all_trues = np.array(all_trues)  # [N, pred_len, features]
+        
+        total_pred_steps = num_samples * pred_len
         
         print(f'\nSliding Window Evaluation complete:')
         print(f'  Predictions shape: {all_preds.shape}')
         print(f'  Ground truth shape: {all_trues.shape}')
+        print(f'  Total predicted timesteps: {total_pred_steps}')
         
-        # Calculate metrics on full predictions (all 384 steps have ground truth!)
+        # Calculate metrics
         mae, mse, rmse, mape, mspe, rse, corr = metric(all_preds, all_trues)
-        print(f'\nTest Metrics (all {total_pred_len} steps):')
+        print(f'\nTest Metrics:')
         print('mse:{}, mae:{}, rse:{}'.format(mse, mae, rse))
-        
-        # Per-iteration metrics
-        print(f'\nPer-iteration Metrics:')
-        for i in range(num_iterations):
-            start_idx = i * pred_len
-            end_idx = (i + 1) * pred_len
-            iter_preds = all_preds[:, start_idx:end_idx, :]
-            iter_trues = all_trues[:, start_idx:end_idx, :]
-            iter_mae, iter_mse, _, _, _, _, _ = metric(iter_preds, iter_trues)
-            print(f'  Iteration {i+1} (steps {start_idx}-{end_idx}): MSE={iter_mse:.7f}, MAE={iter_mae:.7f}')
         
         # Save results
         git_root = os.popen('git rev-parse --show-toplevel 2>/dev/null').read().strip()
@@ -484,7 +474,7 @@ class Exp_Main(Exp_Basic):
             f.write(f'Original PatchTST Test Results (Sliding Window)\n')
             f.write('='*80 + '\n')
             f.write(f'Setting: {setting}\n')
-            f.write(f'Sliding Window: {num_iterations} x {pred_len} = {total_pred_len} total steps\n')
+            f.write(f'Sliding Window: stride={window_stride}, {num_samples} samples x {pred_len} = {total_pred_steps} total steps\n')
             f.write(f'Each prediction uses real {seq_len}-step lookback\n')
             f.write(f'MSE: {mse:.6f}\n')
             f.write(f'MAE: {mae:.6f}\n')
@@ -492,11 +482,34 @@ class Exp_Main(Exp_Basic):
             f.write(f'RSE: {rse:.6f}\n')
             f.write('='*80 + '\n')
 
-        # Save predictions and ground truth (both are 384 steps now!)
+        # Save predictions and ground truth
         np.save(folder_path + 'pred.npy', all_preds)
         np.save(folder_path + 'true.npy', all_trues)
         print(f'Saved predictions shape: {all_preds.shape}')
         print(f'Saved ground truth shape: {all_trues.shape}')
+        
+        # Save combined CSV with predictions and ground truth
+        import pandas as pd
+        num_samples_csv, pred_len_csv, num_features_csv = all_preds.shape
+        
+        # Build CSV rows: sample_idx, step, feature_idx, pred, true
+        rows = []
+        for sample_idx in range(num_samples_csv):
+            for step in range(pred_len_csv):
+                for feat_idx in range(num_features_csv):
+                    rows.append({
+                        'sample_idx': sample_idx,
+                        'step': step,
+                        'feature_idx': feat_idx,
+                        'prediction': all_preds[sample_idx, step, feat_idx],
+                        'ground_truth': all_trues[sample_idx, step, feat_idx]
+                    })
+        
+        csv_df = pd.DataFrame(rows)
+        csv_file = folder_path + 'predictions.csv'
+        csv_df.to_csv(csv_file, index=False)
+        print(f'Saved combined predictions CSV to: {csv_file}')
+        print(f'CSV shape: {len(csv_df)} rows ({num_samples_csv} samples x {pred_len_csv} steps x {num_features_csv} features)')
         return
 
     def predict(self, setting, load=False):

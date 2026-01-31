@@ -94,10 +94,14 @@ if __name__ == '__main__':
     parser.add_argument('--test_flop', action='store_true', default=False, help='See utils/tools for usage')
 
     # Iterative prediction
-    parser.add_argument('--num_iterations', type=int, default=4, 
-                        help='Number of prediction iterations for iterative forecasting (total = num_iterations * pred_len)')
+    parser.add_argument('--num_iterations', type=int, default=1, 
+                        help='Number of prediction iterations per sample (default: 1)')
     parser.add_argument('--iterative', action='store_true', default=False,
                         help='Use iterative multi-step prediction (default: single-step)')
+    parser.add_argument('--max_samples', type=int, default=None,
+                        help='Maximum number of samples to use for sliding window evaluation (default: all)')
+    parser.add_argument('--window_stride', type=int, default=96,
+                        help='Stride between sliding windows (default: 96 for non-overlapping predictions)')
 
     args = parser.parse_args()
 
@@ -176,9 +180,12 @@ if __name__ == '__main__':
         exp = Exp(args)  # set experiments
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
         if args.iterative:
-            print(f'Using sliding window prediction: {args.num_iterations} iterations x {args.pred_len} = {args.num_iterations * args.pred_len} total steps')
-            print('Each prediction uses real historical data (not previous predictions)')
-            exp.test_sliding_window(setting, test=1, num_iterations=args.num_iterations)
+            print(f'Using sliding window prediction with stride={args.window_stride}')
+            print(f'Each sample: {args.seq_len}-step lookback → {args.pred_len}-step prediction')
+            if args.max_samples:
+                print(f'Limiting to {args.max_samples} samples')
+            exp.test_sliding_window(setting, test=1, num_iterations=args.num_iterations, 
+                                   max_samples=args.max_samples, window_stride=args.window_stride)
         else:
             exp.test(setting, test=1)
         torch.cuda.empty_cache()

@@ -479,3 +479,4 @@ main/scripts/result.txt
 main/scripts/results/*
 main/scripts/checkpoints/*
 test_results/
+output/

@@ -98,10 +98,14 @@ def parse_args():
     parser.add_argument('--random_seed', type=int, default=2021, help='random seed')
     
     # Iterative prediction
-    parser.add_argument('--num_iterations', type=int, default=4, 
-                        help='Number of prediction iterations for iterative forecasting (total = num_iterations * pred_len)')
+    parser.add_argument('--num_iterations', type=int, default=1, 
+                        help='Number of prediction iterations per sample (default: 1)')
     parser.add_argument('--iterative', action='store_true', default=False,
                         help='Use iterative multi-step prediction (default: single-step)')
+    parser.add_argument('--max_samples', type=int, default=None,
+                        help='Maximum number of samples to use for sliding window evaluation (default: all)')
+    parser.add_argument('--window_stride', type=int, default=96,
+                        help='Stride between sliding windows (default: 96 for non-overlapping predictions)')
     
     args = parser.parse_args()
     return args
@@ -305,9 +309,16 @@ def main():
     # Final evaluation on test set
     print('\nEvaluating on test set...')
     if args.iterative:
-        print(f'Using sliding window prediction: {args.num_iterations} iterations x {config.pred_len} = {args.num_iterations * config.pred_len} total steps')
-        print('Each prediction uses real historical data (not previous predictions)')
-        results = evaluate_model_sliding_window(model, test_dataset, device, config, num_iterations=args.num_iterations)
+        print(f'Using sliding window prediction with stride={args.window_stride}')
+        print(f'Each sample: {config.seq_len}-step lookback → {config.pred_len}-step prediction')
+        if args.max_samples:
+            print(f'Limiting to {args.max_samples} samples')
+        results = evaluate_model_sliding_window(
+            model, test_dataset, device, config, 
+            num_iterations=args.num_iterations, 
+            max_samples=args.max_samples,
+            window_stride=args.window_stride
+        )
     else:
         results = evaluate_model(model, test_loader, device, config)
     
@@ -315,7 +326,8 @@ def main():
     print('\n' + '='*80)
     print('MSVLPatchTST Test Results')
     if args.iterative:
-        print(f'(Sliding window: {args.num_iterations} x {config.pred_len} = {args.num_iterations * config.pred_len} total steps)')
+        total_steps = args.max_samples * config.pred_len if args.max_samples else 'all'
+        print(f'(Sliding window: stride={args.window_stride}, {args.max_samples} samples x {config.pred_len} = {total_steps} steps)')
     print('='*80)
     print(f'MSE: {results["metrics"]["mse"]:.6f}')
     print(f'MAE: {results["metrics"]["mae"]:.6f}')
@@ -345,6 +357,31 @@ def main():
         true_file = os.path.join(results_dir, 'true.npy')
         np.save(true_file, results['trues'])
         print(f'Saved ground truth to: {true_file}')
+        
+        # Save combined CSV with predictions and ground truth
+        import pandas as pd
+        preds = results['preds']  # [num_samples, pred_len, num_features]
+        trues = results['trues']  # [num_samples, pred_len, num_features]
+        num_samples, pred_len_actual, num_features = preds.shape
+        
+        # Build CSV rows: sample_idx, step, feature_idx, pred, true
+        rows = []
+        for sample_idx in range(num_samples):
+            for step in range(pred_len_actual):
+                for feat_idx in range(num_features):
+                    rows.append({
+                        'sample_idx': sample_idx,
+                        'step': step,
+                        'feature_idx': feat_idx,
+                        'prediction': preds[sample_idx, step, feat_idx],
+                        'ground_truth': trues[sample_idx, step, feat_idx]
+                    })
+        
+        csv_df = pd.DataFrame(rows)
+        csv_file = os.path.join(results_dir, 'predictions.csv')
+        csv_df.to_csv(csv_file, index=False)
+        print(f'Saved combined predictions CSV to: {csv_file}')
+        print(f'CSV shape: {len(csv_df)} rows ({num_samples} samples x {pred_len_actual} steps x {num_features} features)')
     except Exception as e:
         print(f'Error saving predictions: {e}')
     
