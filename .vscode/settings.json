@@ -1,0 +1,16 @@
+{
+  // Prefer the workspace .venv Python interpreter
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  // Backwards compatibility
+  "python.pythonPath": "${workspaceFolder}/.venv/bin/python",
+
+  // Help VS Code respect the venv when launching terminals
+  "terminal.integrated.env.linux": {
+    "PATH": "${workspaceFolder}/.venv/bin:${env:PATH}"
+  },
+
+  // Make the workspace root importable for analysis
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}"
+  ]
+}

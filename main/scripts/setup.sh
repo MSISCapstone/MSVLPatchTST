@@ -17,9 +17,26 @@ else
     echo "Virtual environment already exists at $GIT_REPO_ROOT/.venv"
 fi
 
-# Activate virtual environment
+# Activate virtual environment (POSIX and Windows venv compatibility)
 echo "Activating virtual environment..."
-source "$GIT_REPO_ROOT/.venv/bin/activate"
+if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
+    echo "Activating virtualenv (bin/activate)"
+    source "$GIT_REPO_ROOT/.venv/bin/activate"
+elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
+    echo "Activating virtualenv (Scripts/activate)"
+    source "$GIT_REPO_ROOT/.venv/Scripts/activate"
+else
+    echo "No activation script found in $GIT_REPO_ROOT/.venv; attempting to create venv with python3"
+    python3 -m venv "$GIT_REPO_ROOT/.venv"
+    if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
+        source "$GIT_REPO_ROOT/.venv/bin/activate"
+    elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
+        source "$GIT_REPO_ROOT/.venv/Scripts/activate"
+    else
+        echo "Failed to create or locate activation script in $GIT_REPO_ROOT/.venv" >&2
+        exit 1
+    fi
+fi
 
 # Upgrade pip
 echo "Upgrading pip..."
