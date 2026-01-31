@@ -53,8 +53,8 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
     print(f"\nStarting Physics-Integrated PatchTST Training...")
     print(f"Checkpoint path: {checkpoint_path}")
     print("=" * 70)
-    print(f"Input channels: {args.enc_in} (21 weather + 2 hour)")
-    print(f"Output channels: {args.c_out} (21 weather only)")
+    print(f"Input channels: {args.enc_in} (20 weather + 2 hour)")
+    print(f"Output channels: {args.c_out} (20 weather only)")
     print("─" * 70)
     print(f"Physics Groups (with integrated hour features):")
     for name, cfg in args.patch_configs.items():

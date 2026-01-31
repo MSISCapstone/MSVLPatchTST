@@ -482,7 +482,7 @@ class MSVLPatchTST(nn.Module):
     1. Group-specific encoders for prediction targets (Rain, Temperature, Wind)
     2. Each group uses relevant predictor variables
     3. Cross-group attention learns inter-variable dependencies
-    4. Output predictions for all 21 weather channels
+    4. Output predictions for all 20 weather channels
     
     Key Features:
     - Hour features (hour_sin, hour_cos) are included in all predictor groups
@@ -501,11 +501,11 @@ class MSVLPatchTST(nn.Module):
         
         self.seq_len = configs.seq_len
         self.pred_len = configs.pred_len
-        self.enc_in = configs.enc_in  # 23 (21 weather + 2 hour)
+        self.enc_in = configs.enc_in  # 22 (20 weather + 2 hour)
         self.channel_groups = configs.channel_groups
         self.patch_configs = configs.patch_configs
-        self.c_out = configs.c_out  # Output all 23 channels
-        self.hour_indices = set(configs.hour_feature_indices)  # {21, 22}
+        self.c_out = configs.c_out  # Output 20 weather channels
+        self.hour_indices = set(configs.hour_feature_indices)  # {20, 21}
         self.use_cross_channel = configs.use_cross_channel_encoder  # New config option
         
         # Cross-group attention: disable if using cross-channel encoder (already captures dependencies)
@@ -601,8 +601,8 @@ class MSVLPatchTST(nn.Module):
         """
         MSVLPatchTST.forward
         Purpose: Performs forward pass through the MSVL PatchTST model with group-specific encoding and cross-group attention.
-        Input: x - [bs, seq_len, 23] tensor with 21 weather channels + 2 hour features
-        Output: output - [bs, pred_len, 21] tensor with predictions for all 21 weather channels
+        Input: x - [bs, seq_len, 22] tensor with 20 weather channels + 2 hour features
+        Output: output - [bs, pred_len, 20] tensor with predictions for all 20 weather channels
         """
         bs = x.shape[0]
         
