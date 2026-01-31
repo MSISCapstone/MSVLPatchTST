@@ -31,14 +31,7 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
     Returns:
         Dictionary with training history
     """
-    from .training_utils import EarlyStopping, create_full_train_loader
-    
-    # Create combined train loader with all data
-    full_train_loader = create_full_train_loader(
-        train_loader, val_loader, test_loader, 
-        batch_size=args.batch_size,
-        num_workers=args.num_workers
-    )
+    from .training_utils import EarlyStopping
     
     # Early stopping
     early_stopping = EarlyStopping(patience=args.patience, verbose=True)
@@ -77,7 +70,7 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
         batch_group_losses = {name: [] for name in args.channel_groups.keys()}
         batch_target_losses = {'long': [], 'short': []}
         
-        for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(full_train_loader):
+        for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
             optimizer.zero_grad()
             
             batch_x = batch_x.float().to(device)
