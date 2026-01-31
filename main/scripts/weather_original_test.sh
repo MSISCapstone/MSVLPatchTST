@@ -1,20 +1,21 @@
 #!/bin/bash
 
-# Inference-only script for Weather dataset
-# - Uses the most-recent checkpoint under $GIT_REPO_ROOT/output/checkpoints
-# - Prints test-set statistics (using same split logic as Dataset_Custom)
+# Inference-only script for Weather dataset using Original PatchTST
+# - Uses checkpoint from $GIT_REPO_ROOT/output/Original/checkpoints/weather_336_96
 # - Runs test/inference only (no training)
+# - Outputs to $GIT_REPO_ROOT/output/Original/test_results/weather_336_96/
 
 set -euo pipefail
 
 # Set paths relative to GIT_REPO_ROOT
 GIT_REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Activate virtual environment (POSIX + Windows venv handling; strip CRLF if needed)
+# Activate virtual environment (POSIX + Windows venv handling)
 if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
+    echo "Activating virtualenv (bin/activate)"
     source "$GIT_REPO_ROOT/.venv/bin/activate"
 elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
-    # Try to strip CRLF in case this is a Windows-created venv
+    echo "Activating virtualenv (Scripts/activate)"
     sed -i 's/\r$//' "$GIT_REPO_ROOT/.venv/Scripts/activate" 2>/dev/null || true
     source "$GIT_REPO_ROOT/.venv/Scripts/activate"
 else
@@ -23,7 +24,7 @@ else
     source "$GIT_REPO_ROOT/.venv/bin/activate"
 fi
 
-# Default experiment parameters (match training defaults used by weather_original.sh)
+# Original PatchTST experiment parameters (match training defaults)
 seq_len=336
 label_len=48
 pred_len=96
@@ -34,68 +35,59 @@ model_id_name=weather
 data_name=custom
 random_seed=2021
 
-echo "===== Weather inference (test only) ====="
+echo "===== Original PatchTST inference (test only) ====="
 echo "Project root: $GIT_REPO_ROOT"
 
-# Construct checkpoint path directly (no search needed - we know the exact pattern)
-CKPT_BASE="$GIT_REPO_ROOT/main/scripts/checkpoints"
-if [ ! -d "$CKPT_BASE" ]; then
-    echo "No checkpoints directory found at $CKPT_BASE" >&2
+# Checkpoint and output paths
+CKPT_DIR="$GIT_REPO_ROOT/output/Original/checkpoints/weather_${seq_len}_${pred_len}"
+OUTPUT_DIR="$GIT_REPO_ROOT/output/Original/test_results/weather_${seq_len}_${pred_len}"
+model_id="${model_id_name}_${seq_len}_${pred_len}"
+
+# The setting name matches training checkpoint naming
+setting="${model_id}_PatchTST_custom_ftM_sl${seq_len}_ll${label_len}_pl${pred_len}_dm128_nh16_el3_dl1_df256_fc1_ebtimeF_dtTrue_Exp_0"
+
+# Check checkpoint exists
+if [ ! -f "$CKPT_DIR/checkpoint.pth" ]; then
+    echo "Checkpoint not found at: $CKPT_DIR/checkpoint.pth" >&2
+    echo "Please run training first or copy checkpoint to this location." >&2
     exit 1
 fi
 
-# Construct the expected setting name based on training parameters
-# Pattern: {model_id}_{seq_len}_{pred_len}_PatchTST_custom_ftM_sl{seq_len}_ll{label_len}_pl{pred_len}_dm128_nh16_el3_dl1_df256_fc1_ebtimeF_dtTrue_Exp_0
-setting="${model_id_name}_${seq_len}_${pred_len}_PatchTST_custom_ftM_sl${seq_len}_ll${label_len}_pl${pred_len}_dm128_nh16_el3_dl1_df256_fc1_ebtimeF_dtTrue_Exp_0"
-latest_dir="$CKPT_BASE/$setting"
-
-if [ ! -d "$latest_dir" ]; then
-    echo "Expected checkpoint not found at: $latest_dir" >&2
-    echo "Available checkpoints:" >&2
-    ls -1 "$CKPT_BASE" >&2
-    exit 1
-fi
-setting=$(basename "$latest_dir")
-ckpt_file="$latest_dir/checkpoint.pth"
-
-if [ ! -f "$ckpt_file" ]; then
-    echo "No checkpoint file found at $ckpt_file" >&2
-    exit 1
-fi
-
-# Extract model_id from the setting name (assumes pattern: <model_id>_<ModelName>_...)
-model_marker="_${model_name}_"
-if [[ "$setting" == *"$model_marker"* ]]; then
-    model_id_from_setting="${setting%%$model_marker*}"
-else
-    # fallback: take everything before the second underscore if possible
-    model_id_from_setting="$(echo "$setting" | awk -F'_' '{print $1}')"
-fi
-
-echo "\nUsing checkpoint setting: $setting"
-echo "Inferred model_id: $model_id_from_setting"
-echo "Checkpoint file: $ckpt_file"
+echo ""
+echo "Using checkpoint: $CKPT_DIR/checkpoint.pth"
+echo "Output directory: $OUTPUT_DIR"
+echo "Model ID: $model_id"
 
 # Locate run_longExp.py
-if [ -f "$GIT_REPO_ROOT/PatchTST_supervised/run_longExp.py" ]; then
-    run_script="$GIT_REPO_ROOT/PatchTST_supervised/run_longExp.py"
-else
-    run_script=$(find "$GIT_REPO_ROOT" -name run_longExp.py | head -n1 || true)
-fi
-if [ -z "$run_script" ]; then
-    echo "Could not find run_longExp.py in repository. Ensure PatchTST_supervised is present." >&2
+run_script="$GIT_REPO_ROOT/PatchTST_supervised/run_longExp.py"
+if [ ! -f "$run_script" ]; then
+    echo "Could not find PatchTST_supervised/run_longExp.py in repository." >&2
     exit 1
 fi
 
-# Run test-only (uses the inferred model_id so the constructed 'setting' matches the checkpoint folder)
-echo "\nRunning inference using test set..."
+# Create output directories
+mkdir -p "$OUTPUT_DIR"
+mkdir -p "$GIT_REPO_ROOT/logs/LongForecasting"
+
+# Run test-only inference with sliding window prediction (4 iterations x 96 = 384 total steps)
+# Each prediction uses REAL historical data (not previous predictions)
+# Step 1: Input [0:336]    → Predict [336:432]
+# Step 2: Input [96:432]   → Predict [432:528]
+# Step 3: Input [192:528]  → Predict [528:624]
+# Step 4: Input [288:624]  → Predict [624:720]
+echo ""
+echo "Running Original PatchTST inference using test set..."
+echo "Sliding window prediction: 4 iterations x 96 steps = 384 total steps"
+echo "Each prediction uses real 336-step lookback window"
 (cd "$GIT_REPO_ROOT/PatchTST_supervised" && \
   python -u run_longExp.py \
     --random_seed $random_seed \
     --is_training 0 \
+    --iterative \
+    --num_iterations 4 \
     --root_path "$root_path_name" \
     --data_path "$data_path_name" \
-    --model_id "$model_id_from_setting" \
+    --model_id "$model_id" \
     --model $model_name \
     --data $data_name \
     --features M \
@@ -112,21 +104,36 @@ echo "\nRunning inference using test set..."
     --patch_len 16 \
     --stride 8 \
     --des 'Exp' \
-    --checkpoints "$CKPT_BASE" )
+    --checkpoint_path "$CKPT_DIR/checkpoint.pth" )
 
-# Run plotting and metrics generation using the predictions from this run
-PLOT_LOG="$GIT_REPO_ROOT/logs/LongForecasting/${model_name}_${model_id_name}_${seq_len}_${pred_len}_plot.log"
-echo "\nRunning plotting and metrics generation (log: $PLOT_LOG)..."
+echo ""
+echo "================================================================"
+echo "Original PatchTST inference finished!"
+echo "================================================================"
+
+# Run plotting and metrics generation
+PLOT_LOG="$GIT_REPO_ROOT/logs/LongForecasting/${model_name}_${model_id}_plot.log"
+echo ""
+echo "Running plotting and metrics generation (log: $PLOT_LOG)..."
 if ! (cd "$GIT_REPO_ROOT" && PYTHONPATH="$GIT_REPO_ROOT:$GIT_REPO_ROOT/PatchTST_supervised:${PYTHONPATH:-}" python -u "$GIT_REPO_ROOT/main/plot_original.py" \
     --model_id_name "$model_id_name" \
     --seq_len $seq_len \
     --pred_len $pred_len \
-    --results_src "$GIT_REPO_ROOT/PatchTST_supervised/results/${setting}" 2>&1 | tee -a "$PLOT_LOG"); then
+    --results_src "$GIT_REPO_ROOT/PatchTST_supervised/results" \
+    --output_dir "$OUTPUT_DIR" \
+    --data_file "$data_path_name" 2>&1 | tee -a "$PLOT_LOG"); then
     echo "Plotting failed. See $PLOT_LOG" >&2
 else
     echo "Plotting finished successfully. See $PLOT_LOG for details."
 fi
 
-echo "\nInference finished. Results (npys, plots, etc.) are in $GIT_REPO_ROOT/PatchTST_supervised/results/${setting}/ and $GIT_REPO_ROOT/PatchTST_supervised/test_results/${setting}/; plots & summaries also in $GIT_REPO_ROOT/output/results/${model_id_name}_${seq_len}_${pred_len}/"
+echo ""
+echo "================================================================"
+echo "All outputs saved to: $OUTPUT_DIR"
+echo "  - per_feature_metrics.csv"
+echo "  - test_data_statistics.csv"
+echo "  - prediction_grid_sl${seq_len}_pl${pred_len}.png"
+echo "  - summary.txt"
+echo "================================================================"
 
 exit 0

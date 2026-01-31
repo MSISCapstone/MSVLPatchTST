@@ -27,6 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--freq', type=str, default='h',
                         help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
+    parser.add_argument('--checkpoint_path', type=str, default=None, help='direct path to checkpoint file (overrides checkpoints + setting)')
 
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')
@@ -91,6 +92,12 @@ if __name__ == '__main__':
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
     parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids of multile gpus')
     parser.add_argument('--test_flop', action='store_true', default=False, help='See utils/tools for usage')
+
+    # Iterative prediction
+    parser.add_argument('--num_iterations', type=int, default=4, 
+                        help='Number of prediction iterations for iterative forecasting (total = num_iterations * pred_len)')
+    parser.add_argument('--iterative', action='store_true', default=False,
+                        help='Use iterative multi-step prediction (default: single-step)')
 
     args = parser.parse_args()
 
@@ -168,6 +175,11 @@ if __name__ == '__main__':
 
         exp = Exp(args)  # set experiments
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-        exp.test(setting, test=1)
+        if args.iterative:
+            print(f'Using sliding window prediction: {args.num_iterations} iterations x {args.pred_len} = {args.num_iterations * args.pred_len} total steps')
+            print('Each prediction uses real historical data (not previous predictions)')
+            exp.test_sliding_window(setting, test=1, num_iterations=args.num_iterations)
+        else:
+            exp.test(setting, test=1)
         torch.cuda.empty_cache()
         

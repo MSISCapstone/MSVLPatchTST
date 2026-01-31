@@ -511,11 +511,12 @@ class PhysicsIntegratedPatchTST(nn.Module):
         # Cross-group attention: disable if using cross-channel encoder (already captures dependencies)
         self.use_cross_group_attn = configs.use_cross_group_attention and not self.use_cross_channel
         
-        # RevIN for normalization (all input channels)
+        # RevIN for normalization (only for weather channels, not hour features)
         self.revin = configs.revin
         if self.revin:
-            from layers.RevIN import RevIN
-            self.revin_layer = RevIN(configs.enc_in, affine=configs.affine, 
+            from MSVLPatchTST.layers.RevIN import RevIN
+            # RevIN only for c_out channels (weather features), not hour features
+            self.revin_layer = RevIN(configs.c_out, affine=configs.affine, 
                                       subtract_last=configs.subtract_last)
         
         # Create encoder for each channel group
@@ -608,11 +609,13 @@ class PhysicsIntegratedPatchTST(nn.Module):
         # Permute to [bs, enc_in, seq_len]
         x = x.permute(0, 2, 1)
         
-        # Apply RevIN normalization
+        # Apply RevIN normalization only to weather channels (first c_out channels)
         if self.revin:
-            x = x.permute(0, 2, 1)
-            x = self.revin_layer(x, 'norm')
-            x = x.permute(0, 2, 1)
+            weather_x = x[:, :self.c_out, :]  # [bs, c_out, seq_len]
+            weather_x = weather_x.permute(0, 2, 1)  # [bs, seq_len, c_out]
+            weather_x = self.revin_layer(weather_x, 'norm')  # Normalize
+            weather_x = weather_x.permute(0, 2, 1)  # [bs, c_out, seq_len]
+            x[:, :self.c_out, :] = weather_x  # Put back normalized weather channels
         
         # Step 1: Group-independent encoding
         all_outputs = torch.zeros(bs, self.c_out, self.pred_len, device=x.device)
@@ -640,11 +643,8 @@ class PhysicsIntegratedPatchTST(nn.Module):
             alpha = torch.sigmoid(self.cross_group_weight)
             output = (1 - alpha) * output + alpha * cross_output
         
-        # Step 3: RevIN denormalization
+        # Step 3: RevIN denormalization (only for weather channels)
         if self.revin:
-            temp_output = torch.zeros(bs, self.pred_len, self.enc_in, device=x.device)
-            temp_output[:, :, :self.c_out] = output
-            temp_output = self.revin_layer(temp_output, 'denorm')
-            output = temp_output[:, :, :self.c_out]
+            output = self.revin_layer(output, 'denorm')
         
         return output

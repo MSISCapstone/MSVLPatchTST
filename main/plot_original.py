@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
 """
-Plotting helper for the original Weather experiments.
+Plotting helper for the Original PatchTST experiments.
 
 - Creates a 2x3 figure with the following layout:
   Row 1: 'p (mbar)', 'T (degC)', 'wv (m/s)'
   Row 2: 'max. wv (m/s)', 'rain (mm)', 'raining (s)'
 
 - Reads predictions from a results folder (expects `pred.npy` saved by experiments)
-- Reconstructs ground-truth test values by loading the dataset (uses same split logic as Dataset_Custom)
+- Reconstructs ground-truth test values by loading the dataset
 - Computes per-feature metrics (MAE, MSE, RMSE, RSE)
-- Saves the figure and a CSV summary into `GIT_REPO_ROOT/outputs/results/{model_id_name}_{seq_len}_{pred_len}` (created if missing)
+- Generates test source data statistics per feature
+- Saves all outputs to the specified output directory
 
 Usage:
   python main/plot_original.py \
-    --model_id_name weather --seq_len 96 --pred_len 96 \
-    [--results_src PATH] [--data_root PATH] [--data_file weather.csv]
-
-If --results_src is provided, the script will look for `pred.npy` there. Otherwise it will try:
-  GIT_REPO_ROOT/results/<setting>/pred.npy
-then
-  GIT_REPO_ROOT/output/results/<model_id_name>_<seq_len>_<pred_len>/pred.npy
-
+    --model_id_name weather --seq_len 336 --pred_len 96 \
+    [--results_src PATH] [--output_dir PATH] [--data_file weather.csv]
 """
 
 import os
@@ -29,8 +24,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
-
-# Import utilities from project
 from types import SimpleNamespace
 
 from PatchTST_supervised.data_provider.data_factory import data_provider
@@ -45,47 +38,42 @@ FEATURES_TO_PLOT = [
     'raining (s)'
 ]
 
-PLOT_ORDER = FEATURES_TO_PLOT  # ordered as requested
+PLOT_ORDER = FEATURES_TO_PLOT
 
 
 def find_pred_file(results_src, git_root, model_id_name, seq_len, pred_len):
-    # user-supplied
+    """Find the prediction file in the output folder or fallback locations."""
+    model_id = f"{model_id_name}_{seq_len}_{pred_len}"
+    
+    # Primary location: output/Original/test_results/model_id/
+    primary_loc = Path(git_root) / 'output' / 'Original' / 'test_results' / model_id
+    pred_file = primary_loc / 'pred.npy'
+    if pred_file.exists():
+        return pred_file, primary_loc
+    
+    # If results_src is provided, search there
     if results_src:
         p = Path(results_src)
-        if p.is_dir() and (p / 'pred.npy').exists():
+        if (p / 'pred.npy').exists():
             return p / 'pred.npy', p
-        elif p.exists() and p.name.endswith('.npy'):
-            return p, p.parent
-        else:
-            raise FileNotFoundError(f"No pred.npy found under provided results_src: {results_src}")
+        
+        # Check in setting subdirectories
+        for subdir in p.iterdir():
+            if subdir.is_dir() and model_id in subdir.name:
+                pred_file = subdir / 'pred.npy'
+                if pred_file.exists():
+                    return pred_file, subdir
 
-    # common locations: results/<setting>/pred.npy (as experiments do)
-    # fallback to output/results/<model_id_name>_<seq_len>_<pred_len>/pred.npy
-    # check output/results path first
-    fallback = Path(git_root) / 'output' / 'results' / f"{model_id_name}_{seq_len}_{pred_len}"
-    if (fallback / 'pred.npy').exists():
-        return fallback / 'pred.npy', fallback
-
-    # try results/<setting> (we don't know the exact setting name, pick the one that contains model_id_name and seq/pred)
-    results_root = Path(git_root) / 'results'
-    if results_root.exists():
-        # pick candidate folders
-        candidates = [p for p in results_root.iterdir() if p.is_dir() and model_id_name in p.name and f"sl{seq_len}" in p.name or f"pl{pred_len}" in p.name]
-        # fallback more lenient search
-        if not candidates:
-            candidates = [p for p in results_root.iterdir() if p.is_dir() and model_id_name in p.name]
-        # pick most recent
-        if candidates:
-            candidates = sorted(candidates, key=lambda p: p.stat().st_mtime)
-            p = candidates[-1]
-            if (p / 'pred.npy').exists():
-                return p / 'pred.npy', p
-
-    raise FileNotFoundError("Could not locate pred.npy in common locations. Please point --results_src to the folder that contains pred.npy")
+    # Build error message with expected location
+    raise FileNotFoundError(
+        f"No pred.npy found.\n"
+        f"Expected location: {primary_loc}\n"
+        f"Run inference first: ./main/scripts/weather_original_test.sh"
+    )
 
 
-def build_test_truths(git_root, root_path_name, data_path_name, seq_len, label_len, pred_len, batch_size=128, num_workers=0):
-    # Build a fake args object for data_provider
+def build_test_truths(root_path_name, data_path_name, seq_len, label_len, pred_len, batch_size=128, num_workers=0):
+    """Build ground truth values from test dataset."""
     args = SimpleNamespace()
     args.data = 'custom'
     args.root_path = root_path_name
@@ -103,19 +91,20 @@ def build_test_truths(git_root, root_path_name, data_path_name, seq_len, label_l
     dataset, loader = data_provider(args, flag='test')
 
     trues = []
-    for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(loader):
-        # batched true values shaped (B, pred_len, D)
-        # extract last pred_len dims and append
+    for batch_x, batch_y, batch_x_mark, batch_y_mark in loader:
         f_dim = -1 if args.features == 'MS' else 0
         batch_y = batch_y[:, -pred_len:, f_dim:].numpy()
         trues.append(batch_y)
+    
     if not trues:
-        raise RuntimeError('No test batches found when reconstructing ground-truths')
+        raise RuntimeError('No test batches found')
+    
     trues = np.concatenate(trues, axis=0)
     return trues, dataset
 
 
-def compute_feature_indices(git_root, root_path_name, data_path_name, target='OT'):
+def compute_feature_columns(root_path_name, data_path_name, target='OT'):
+    """Get feature column names from data file."""
     path = Path(root_path_name) / data_path_name
     df = pd.read_csv(path)
     cols = list(df.columns)
@@ -123,303 +112,244 @@ def compute_feature_indices(git_root, root_path_name, data_path_name, target='OT
         cols.remove('date')
     if target in cols:
         cols.remove(target)
-    data_columns = cols + [target]
-    return data_columns
+    return cols + [target]
+
+
+def compute_test_data_statistics(root_path_name, data_path_name, data_columns, out_dir):
+    """Compute and save test data statistics per feature."""
+    path = Path(root_path_name) / data_path_name
+    df = pd.read_csv(path)
+    
+    # Get test split (last 20% as in Dataset_Custom)
+    n = len(df)
+    border1 = int(n * 0.7)  # end of validation
+    border2 = n
+    test_df = df.iloc[border1:border2]
+    
+    stats = []
+    for col in data_columns:
+        if col in test_df.columns:
+            series = test_df[col]
+            stats.append({
+                'feature': col,
+                'count': series.count(),
+                'mean': series.mean(),
+                'std': series.std(),
+                'min': series.min(),
+                '25%': series.quantile(0.25),
+                '50%': series.quantile(0.50),
+                '75%': series.quantile(0.75),
+                'max': series.max()
+            })
+    
+    stats_df = pd.DataFrame(stats)
+    stats_df.to_csv(Path(out_dir) / 'test_data_statistics.csv', index=False)
+    print(f"Saved test data statistics to {out_dir}/test_data_statistics.csv")
+    return stats_df
 
 
 def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
-    # preds and trues shapes: (N, pred_len, D)
+    """Save per-feature metrics and create prediction plots."""
     os.makedirs(out_dir, exist_ok=True)
 
     D = preds.shape[-1]
+    actual_pred_len = preds.shape[1]  # Actual prediction length from data (may be 384 for iterative)
+    true_len = trues.shape[1]  # Ground truth length (typically 96)
+    
+    print(f"Predictions shape: {preds.shape} (actual pred_len={actual_pred_len})")
+    print(f"Ground truth shape: {trues.shape} (true_len={true_len})")
+    
+    # For metrics, use only the overlapping portion (where we have ground truth)
+    min_len = min(actual_pred_len, true_len)
+    preds_for_metrics = preds[:, :min_len, :]
+    trues_for_metrics = trues[:, :min_len, :]
 
-    # compute per-feature metrics and save
+    # Compute per-feature metrics (on overlapping portion)
     metrics = []
     for idx, name in enumerate(data_columns):
         if idx >= D:
             break
-        p = preds[..., idx]
-        t = trues[..., idx]
+        p = preds_for_metrics[..., idx]
+        t = trues_for_metrics[..., idx]
         mae = MAE(p, t)
         mse = MSE(p, t)
         rmse = RMSE(p, t)
         rse = RSE(p, t)
-        metrics.append({'feature': name, 'index': idx, 'mae': mae, 'mse': mse, 'rmse': rmse, 'rse': rse})
+        metrics.append({
+            'feature': name,
+            'index': idx,
+            'mae': float(mae),
+            'mse': float(mse),
+            'rmse': float(rmse),
+            'rse': float(rse)
+        })
+    
     metrics_df = pd.DataFrame(metrics)
     metrics_df.to_csv(Path(out_dir) / 'per_feature_metrics.csv', index=False)
+    print(f"Saved per-feature metrics to {out_dir}/per_feature_metrics.csv")
 
-    # plot requested features in 2x3 grid
-    plot_features = PLOT_ORDER
-    # map to indices
+    # Create 2x3 plot grid for selected features
     feature_indices = []
-    for f in plot_features:
+    for f in PLOT_ORDER:
         if f in data_columns:
             feature_indices.append(data_columns.index(f))
         else:
             feature_indices.append(None)
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 8), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10), constrained_layout=True)
     axes = axes.flatten()
 
-    for ax, feat_name, feat_idx in zip(axes, plot_features, feature_indices):
+    for ax, feat_name, feat_idx in zip(axes, PLOT_ORDER, feature_indices):
         if feat_idx is None or feat_idx >= preds.shape[-1]:
             ax.text(0.5, 0.5, f'Feature not found: {feat_name}', ha='center', va='center')
             ax.set_title(feat_name)
             continue
-        p = preds[..., feat_idx]  # (N, pred_len)
-        t = trues[..., feat_idx]
-        # mean across samples
+        
+        p = preds[..., feat_idx]  # Full predictions (384 steps)
+        t = trues[..., feat_idx]  # Ground truth (96 steps)
+        
+        # Mean across samples for predictions (full length)
         mean_p = np.nanmean(p, axis=0)
+        std_p = np.nanstd(p, axis=0)
+        
+        # Mean across samples for ground truth (shorter length)
         mean_t = np.nanmean(t, axis=0)
-        # compute metrics for display
-        mae = MAE(p, t)
-        mse = MSE(p, t)
+        std_t = np.nanstd(t, axis=0)
+        
+        # Compute metrics on overlapping portion
+        p_overlap = p[:, :true_len]
+        mae = MAE(p_overlap, t)
+        mse = MSE(p_overlap, t)
 
-        x = np.arange(pred_len)
-        ax.plot(x, mean_t, label='Mean True', linewidth=2)
-        ax.plot(x, mean_p, label='Mean Pred', linewidth=2)
-        ax.set_title(f"{feat_name} (MAE={mae:.4f}, MSE={mse:.4f})")
-        ax.legend()
-        ax.set_xlabel('Horizon')
+        # Plot full prediction length
+        x_pred = np.arange(actual_pred_len)
+        x_true = np.arange(true_len)
+        
+        # Plot ground truth (shorter)
+        ax.fill_between(x_true, mean_t - std_t, mean_t + std_t, alpha=0.2, color='blue')
+        ax.plot(x_true, mean_t, label=f'Ground Truth ({true_len} steps)', linewidth=2, color='blue')
+        
+        # Plot predictions (full 384 steps)
+        ax.fill_between(x_pred, mean_p - std_p, mean_p + std_p, alpha=0.2, color='orange')
+        ax.plot(x_pred, mean_p, label=f'Prediction ({actual_pred_len} steps)', linewidth=2, color='orange')
+        
+        # Add vertical line at the boundary between ground truth and extrapolation
+        if actual_pred_len > true_len:
+            ax.axvline(x=true_len, color='red', linestyle='--', alpha=0.5, label='GT boundary')
+        
+        ax.set_title(f"{feat_name}\nMAE={mae:.4f}, MSE={mse:.4f} (first {true_len} steps)")
+        ax.legend(loc='upper right', fontsize=8)
+        ax.set_xlabel('Prediction Horizon (timesteps)')
+        ax.set_ylabel('Value')
+        ax.grid(True, alpha=0.3)
 
-    fig_file = Path(out_dir) / f'prediction_grid_sl{seq_len}_pl{pred_len}.png'
-    fig.savefig(fig_file, bbox_inches='tight')
+    fig.suptitle(f'Original PatchTST Weather Predictions (seq_len={seq_len}, total_pred={actual_pred_len})', fontsize=14)
+    fig_file = Path(out_dir) / f'prediction_grid_sl{seq_len}_pl{actual_pred_len}.png'
+    fig.savefig(fig_file, bbox_inches='tight', dpi=150)
     plt.close(fig)
+    print(f"Saved prediction plot to {fig_file}")
 
-    # Save a small summary text file
+    # Save summary text file
     with open(Path(out_dir) / 'summary.txt', 'w') as fh:
-        fh.write('Per-feature metrics\n')
+        fh.write('Original PatchTST Test Results Summary\n')
+        fh.write('=' * 60 + '\n\n')
+        fh.write(f'Sequence Length: {seq_len}\n')
+        fh.write(f'Total Prediction Length: {actual_pred_len}\n')
+        fh.write(f'Ground Truth Length: {true_len}\n')
+        fh.write(f'Number of test samples: {preds.shape[0]}\n')
+        fh.write(f'Number of features: {D}\n\n')
+        fh.write(f'Per-feature Metrics (computed on first {true_len} steps):\n')
+        fh.write('-' * 60 + '\n')
         fh.write(metrics_df.to_string(index=False))
-        fh.write('\n')
+        fh.write('\n\n')
+        
+        # Overall metrics (on overlapping portion)
+        overall_mae = MAE(preds_for_metrics, trues_for_metrics)
+        overall_mse = MSE(preds_for_metrics, trues_for_metrics)
+        overall_rmse = RMSE(preds_for_metrics, trues_for_metrics)
+        fh.write(f'Overall Metrics (first {true_len} steps with ground truth):\n')
+        fh.write('-' * 60 + '\n')
+        fh.write(f'MAE: {overall_mae:.6f}\n')
+        fh.write(f'MSE: {overall_mse:.6f}\n')
+        fh.write(f'RMSE: {overall_rmse:.6f}\n')
 
-    print(f"Saved plots and metrics to {out_dir}")
-
-
-def save_model_architecture(git_root, found_dir, out_dir, seq_len, enc_in=21):
-    """Attempt to load the checkpoint for the setting (found_dir.name) and save model architecture info.
-    Saves:
-      - model_architecture.txt (str(model))
-      - model_architecture_summary.txt (torchinfo.summary output) if available
-      - model_architecture_graph.png (torchviz) if available
-    """
-    import torch
-    from pathlib import Path
-    out_dir = Path(out_dir)
-    ckpt_candidates = [
-        Path(git_root) / 'output' / 'checkpoints' / found_dir.name / 'checkpoint.pth',
-        Path(git_root) / 'checkpoints' / found_dir.name / 'checkpoint.pth',
-        Path(git_root) / 'output' / 'checkpoints' / found_dir.name / 'checkpoint.pth',
-        Path(git_root) / 'checkpoints' / found_dir.name / 'checkpoint.pth'
-    ]
-    ckpt_path = None
-    for c in ckpt_candidates:
-        if c.exists():
-            ckpt_path = c
-            break
-    if ckpt_path is None:
-        print(f"No checkpoint found for setting {found_dir.name} in expected locations; skipping model architecture save")
-        return
-
-    print(f"Found checkpoint at {ckpt_path} - attempting to load model for architecture dump")
-
-    # Try to import model builder used by experiments
-    try:
-        from PatchTST_supervised.models import PatchTST as PatchTSTModelClass
-    except Exception as e:
-        # If direct import fails, try to import a Model name from a fallback location
-        PatchTSTModelClass = None
-
-    if PatchTSTModelClass is None:
-        try:
-            # fallback: try to import a module named PatchTST (some codebases provide .Model)
-            import importlib
-            m = importlib.import_module('PatchTST_supervised')
-            PatchTSTModelClass = getattr(m, 'PatchTST', None)
-        except Exception:
-            PatchTSTModelClass = None
-
-    def dump_checkpoint_param_summary(ckpt_path, out_dir):
-        """Dump parameter names, shapes and counts from the checkpoint to text files."""
-        import torch
-        from pathlib import Path
-        out_dir = Path(out_dir)
-        try:
-            state = torch.load(ckpt_path, map_location='cpu')
-        except Exception as e:
-            with open(out_dir / 'model_architecture.txt', 'w') as fh:
-                fh.write(f"Failed to load checkpoint {ckpt_path}: {e}\n")
-            return
-
-        # Find a state dict inside the checkpoint if wrapped
-        sd = None
-        if isinstance(state, dict):
-            for key in ('state_dict', 'model_state_dict', 'model', 'state'):
-                if key in state and isinstance(state[key], dict):
-                    sd = state[key]
-                    break
-            if sd is None and all(isinstance(v, (torch.Tensor,)) for v in state.values()):
-                sd = state
-        if sd is None:
-            # try attribute-style
-            if hasattr(state, 'state_dict'):
-                sd = state.state_dict()
-        if sd is None:
-            with open(out_dir / 'model_architecture.txt', 'w') as fh:
-                fh.write(f"Checkpoint loaded but no parameter dict found in {ckpt_path}\n")
-                fh.write(str(type(state)) + "\n")
-            return
-
-        total = 0
-        per_prefix = {}
-        lines = []
-        for name, val in sd.items():
-            try:
-                if isinstance(val, torch.Tensor):
-                    shape = tuple(val.size())
-                    nelems = val.numel()
-                else:
-                    # some checkpoints might store numpy arrays or other types
-                    try:
-                        arr = np.array(val)
-                        shape = arr.shape
-                        nelems = arr.size
-                    except Exception:
-                        shape = str(type(val))
-                        nelems = 0
-                total += nelems
-                prefix = name.split('.')[0] if '.' in name else name
-                per_prefix[prefix] = per_prefix.get(prefix, 0) + nelems
-                lines.append(f"{name}\t{shape}\t{nelems}")
-            except Exception as e:
-                lines.append(f"{name}\t<error: {e}>")
-
-        with open(out_dir / 'model_architecture.txt', 'w') as fh:
-            fh.write(f"Checkpoint: {ckpt_path}\n")
-            fh.write(f"Total params (approx): {total}\n\n")
-            fh.write("Per-prefix parameter counts:\n")
-            for k, v in sorted(per_prefix.items(), key=lambda x: -x[1]):
-                fh.write(f"{k}: {v}\n")
-            fh.write("\nFirst 100 parameter entries:\n")
-            fh.write("name\tshape\tcount\n")
-            fh.write("\n".join(lines[:100]))
-
-        # write full parameter list separately
-        with open(out_dir / 'model_parameters_list.txt', 'w') as fh:
-            fh.write("name\tshape\tcount\n")
-            fh.write("\n".join(lines))
-
-        print(f"Wrote checkpoint parameter summary to {out_dir / 'model_architecture.txt'} and full list to {out_dir / 'model_parameters_list.txt'}")
-
-    if PatchTSTModelClass is None:
-        # Try dumping checkpoint parameters if we cannot import/instantiate model class
-        print("Could not import PatchTST model class; extracting parameter summary from checkpoint")
-        dump_checkpoint_param_summary(ckpt_path, out_dir)
-        return
-
-    # Build a minimal args namespace compatible with model construction
-    from types import SimpleNamespace
-    args = SimpleNamespace()
-    args.enc_in = enc_in
-    args.seq_len = seq_len
-    args.label_len = 48
-    args.pred_len = 96
-    # set reasonable defaults often used in experiments
-    args.patch_len = 16
-    args.stride = 8
-    args.d_model = 128
-    args.n_heads = 16
-    args.e_layers = 3
-    args.d_layers = 1
-    args.d_ff = 256
-    args.fc_dropout = 0.2
-    args.head_dropout = 0
-
-    try:
-        # exp_main used: model = PatchTST.Model(args)
-        model = PatchTSTModelClass.Model(args)
-        state = torch.load(ckpt_path, map_location='cpu')
-        try:
-            model.load_state_dict(state)
-        except Exception:
-            # sometimes checkpoint is nested under 'model' or other keys
-            if isinstance(state, dict) and 'model' in state:
-                model.load_state_dict(state['model'])
-        # Save text representation
-        with open(out_dir / 'model_architecture.txt', 'w') as fh:
-            fh.write(str(model))
-
-        # Try torchinfo summary
-        try:
-            from torchinfo import summary
-            s = summary(model, input_size=(1, args.enc_in, args.seq_len), verbose=0)
-            with open(out_dir / 'model_architecture_summary.txt', 'w') as fh:
-                fh.write(str(s))
-        except Exception as e:
-            print('torchinfo not available or failed:', e)
-
-        # Try torchviz graph
-        try:
-            from torchviz import make_dot
-            import torch
-            dummy = torch.zeros(1, args.enc_in, args.seq_len)
-            model.eval()
-            with torch.no_grad():
-                y = model(dummy)
-            dot = make_dot(y, params=dict(model.named_parameters()))
-            dot.format = 'png'
-            out_png = out_dir / 'model_architecture_graph'
-            dot.render(str(out_png), cleanup=True)
-        except Exception as e:
-            print('torchviz graph generation failed or not available:', e)
-
-        print(f"Saved model architecture files into {out_dir}")
-    except Exception as e:
-        print('Failed to instantiate or load model for architecture dump:', e)
-        # fallback to checkpoint parsing
-        dump_checkpoint_param_summary(ckpt_path, out_dir)
-
-
+    print(f"Saved summary to {out_dir}/summary.txt")
 
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument('--model_id_name', default='weather')
-    p.add_argument('--seq_len', type=int, default=96)
-    p.add_argument('--label_len', type=int, default=48)
-    p.add_argument('--pred_len', type=int, default=96)
-    p.add_argument('--results_src', default=None, help='Path to folder containing pred.npy (optional)')
-    p.add_argument('--data_root', default=None, help='Path to datasets root (defaults to GIT_REPO_ROOT/datasets)')
-    p.add_argument('--data_file', default='weather.csv')
-    p.add_argument('--batch_size', type=int, default=128)
-    p.add_argument('--num_workers', type=int, default=0)
+    parser = argparse.ArgumentParser(description='Original PatchTST Plotting and Metrics')
+    parser.add_argument('--model_id_name', default='weather')
+    parser.add_argument('--seq_len', type=int, default=336)
+    parser.add_argument('--label_len', type=int, default=48)
+    parser.add_argument('--pred_len', type=int, default=96)
+    parser.add_argument('--results_src', default=None, help='Path to folder containing pred.npy')
+    parser.add_argument('--output_dir', default=None, help='Output directory for results')
+    parser.add_argument('--data_root', default=None, help='Path to datasets root')
+    parser.add_argument('--data_file', default='weather.csv')
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--num_workers', type=int, default=0)
 
-    args = p.parse_args()
+    args = parser.parse_args()
 
-    # determine git root
+    # Determine git root
     git_root = os.popen('git rev-parse --show-toplevel').read().strip()
     if not git_root:
         git_root = os.getcwd()
 
     root_path_name = args.data_root if args.data_root else os.path.join(git_root, 'datasets', 'weather')
+    
+    # Output directory
+    if args.output_dir:
+        out_dir = Path(args.output_dir)
+    else:
+        out_dir = Path(git_root) / 'output' / 'Original' / 'test_results' / f"{args.model_id_name}_{args.seq_len}_{args.pred_len}"
+    
+    os.makedirs(out_dir, exist_ok=True)
 
+    # Find and load predictions
     pred_file, found_dir = find_pred_file(args.results_src, git_root, args.model_id_name, args.seq_len, args.pred_len)
-
+    print(f"Loading predictions from: {pred_file}")
     preds = np.load(pred_file)
-    # preds shape should be (N, pred_len, D)
+    print(f"Predictions shape: {preds.shape}")
 
-    trues, dataset = build_test_truths(git_root, root_path_name, args.data_file, args.seq_len, args.label_len, args.pred_len, batch_size=args.batch_size, num_workers=args.num_workers)
+    # Load ground truth from saved file (saved alongside predictions)
+    true_file = found_dir / 'true.npy'
+    if true_file.exists():
+        print(f"Loading ground truth from: {true_file}")
+        trues = np.load(true_file)
+    else:
+        # Fallback: rebuild from data loader
+        print("Warning: true.npy not found, rebuilding from data loader...")
+        trues, dataset = build_test_truths(
+            root_path_name, args.data_file,
+            args.seq_len, args.label_len, args.pred_len,
+            batch_size=args.batch_size, num_workers=args.num_workers
+        )
+    print(f"Ground truth shape: {trues.shape}")
+    
+    # Verify shapes match
+    if preds.shape != trues.shape:
+        print(f"Warning: Shape mismatch - preds {preds.shape} vs trues {trues.shape}")
+        # Use minimum number of features
+        n_features = min(preds.shape[-1], trues.shape[-1])
+        preds = preds[..., :n_features]
+        trues = trues[..., :n_features]
+        print(f"Truncated to {n_features} features")
 
-    data_columns = compute_feature_indices(git_root, root_path_name, args.data_file)
+    # Get feature column names
+    data_columns = compute_feature_columns(root_path_name, args.data_file)
+    # Adjust columns to match actual prediction dimensions
+    if len(data_columns) > preds.shape[-1]:
+        data_columns = data_columns[:preds.shape[-1]]
+    print(f"Data columns ({len(data_columns)}): {data_columns[:5]}...")
 
-    # Create outputs dir per user's request under /outputs/results/{model_id_name}_{seq_len}_{pred_len}
-    out_dir = Path(git_root) / 'output' / 'test_results' / f"{args.model_id_name}_{args.seq_len}_{args.pred_len}"
+    # Save test data statistics
+    compute_test_data_statistics(root_path_name, args.data_file, data_columns, out_dir)
+
+    # Save metrics and plots
     save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len)
 
-    # Save model architecture files (text, optional torchinfo/torchviz)
-    try:
-        save_model_architecture(git_root, found_dir, out_dir, args.seq_len, enc_in=21)
-    except Exception as e:
-        print('Failed to save model architecture:', e)
+    print(f"\nAll outputs saved to: {out_dir}")
 
 
 if __name__ == '__main__':

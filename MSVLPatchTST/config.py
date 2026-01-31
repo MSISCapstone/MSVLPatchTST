@@ -25,12 +25,12 @@ class PhysicsIntegratedConfig:
         self.pred_len = 336   # Prediction length (~2.3 days)
 
         # Model parameters
-        self.model = 'PhysicsIntegratedPatchTST'
-        # Dataset has 24 features total:
-        # 20 weather variables + OT + hour_sin + hour_cos
-        self.enc_in = 24      # Total input channels
-        self.dec_in = 24
-        self.c_out = 24       # Output all channels
+        self.model = 'MSVLPatchTST'
+        # Dataset has 22 features for MSVLPatchTST:
+        # 20 weather variables (excluding OT) + hour_sin + hour_cos
+        self.enc_in = 22      # Total input channels (without OT)
+        self.dec_in = 22
+        self.c_out = 20       # Output only weather channels (not hour features)
         self.d_model = 128
         self.n_heads = 16
         self.e_layers = 3
@@ -51,8 +51,8 @@ class PhysicsIntegratedConfig:
         self.long_channel_pool_kernel = 4
         self.long_channel_pool_stride = 1
 
-        # Hour-of-day feature configuration (indices adjusted for enc_in=24)
-        self.hour_feature_indices = [22, 23]  # hour_sin, hour_cos (OT is at index 21)
+        # Hour-of-day feature configuration (indices adjusted for enc_in=22, OT excluded)
+        self.hour_feature_indices = [20, 21]  # hour_sin, hour_cos (indices after excluding OT)
 
         # Encoder architecture
         self.use_cross_channel_encoder = False  # Set to True to use cross-channel embeddings
@@ -60,7 +60,7 @@ class PhysicsIntegratedConfig:
 
         # Legacy PatchTST params (for compatibility)
         self.padding_patch = 'end'
-        self.revin = 1
+        self.revin = 1  # Enable RevIN (applied only to weather channels)
         self.affine = 0
         self.subtract_last = 0
         self.decomposition = 0
@@ -97,28 +97,28 @@ class PhysicsIntegratedConfig:
         self.loss = 'mse'
 
     def _define_channel_groups(self):
-        """Define long and short channel grouping"""
-        # Define channel names based on the CSV header including OT and hour features
+        """Define long and short channel grouping (excluding OT for MSVLPatchTST)"""
+        # Define channel names based on the CSV header, excluding OT
         full_names = [
             'p (mbar)', 'T (degC)', 'Tpot (K)', 'Tdew (degC)', 'rh (%)', 'VPmax (mbar)', 'VPact (mbar)',
             'VPdef (mbar)', 'sh (g/kg)', 'H2OC (mmol/mol)', 'rho (g/m**3)', 'wv (m/s)', 'max. wv (m/s)',
             'wd (deg)', 'rain (mm)', 'raining (s)', 'SWDR (W/m2)', 'PAR (umol/m2/s)', 'max. PAR (umol/m2/s)',
-            'Tlog (degC)', 'OT', 'hour_sin', 'hour_cos'
+            'Tlog (degC)', 'hour_sin', 'hour_cos'  # OT excluded
         ]
 
         return {
             'short_channel': {
-                'indices': list(range(24)),  # All input channels for enc_in=24
+                'indices': list(range(22)),  # All input channels for enc_in=22 (no OT)
                 'names': full_names,
-                # Output all 24 features for MSE optimization across all variables
-                'output_indices': list(range(24)),
-                'description': 'Short channel predictors for all features'
+                # Output only the 20 weather features (not hour_sin, hour_cos)
+                'output_indices': list(range(20)),
+                'description': 'Short channel predictors for weather features'
             },
             'long_channel': {
-                'indices': list(range(24)),  # All input channels for enc_in=24
+                'indices': list(range(22)),  # All input channels for enc_in=22 (no OT)
                 'names': full_names,
-                # Output all 24 features for MSE optimization across all variables
-                'output_indices': list(range(24)),
-                'description': 'Long channel predictors for all features'
+                # Output only the 20 weather features (not hour_sin, hour_cos)
+                'output_indices': list(range(20)),
+                'description': 'Long channel predictors for weather features'
             }
         }

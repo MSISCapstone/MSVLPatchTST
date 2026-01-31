@@ -106,10 +106,11 @@ def validate(model, val_loader, criterion, device, target_indices):
             batch_x = batch_x.float().to(device)
             batch_y = batch_y.float().to(device)
             
-            # Forward pass - outputs all 22 channels
-            outputs = model(batch_x)  # [bs, pred_len, 22]
+            # Forward pass - outputs only weather channels (c_out)
+            outputs = model(batch_x)  # [bs, pred_len, c_out]
             outputs_selected = outputs[:, -model.pred_len:, :]
-            batch_y_selected = batch_y[:, -model.pred_len:, :]
+            # Only compare weather channels
+            batch_y_selected = batch_y[:, -model.pred_len:, :model.c_out]
             
             loss = criterion(outputs_selected.cpu(), batch_y_selected.cpu())
             total_loss.append(loss.item())
@@ -153,7 +154,7 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
-        self.val_loss_min = np.Inf
+        self.val_loss_min = np.inf
         self.delta = delta
         
     def __call__(self, val_loss, model, path):
