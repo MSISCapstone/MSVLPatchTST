@@ -474,9 +474,9 @@ class CrossGroupAttention(nn.Module):
         return x_out
 
 
-class PhysicsIntegratedPatchTST(nn.Module):
+class MSVLPatchTST(nn.Module):
     """
-    Predictor-based PatchTST with hour features and Cross-Group Attention.
+    Multi-Scale Variable-Length PatchTST with hour features and Cross-Group Attention.
     
     Architecture:
     1. Group-specific encoders for prediction targets (Rain, Temperature, Wind)
@@ -492,8 +492,8 @@ class PhysicsIntegratedPatchTST(nn.Module):
     """
     def __init__(self, configs):
         """
-        PhysicsIntegratedPatchTST.__init__
-        Purpose: Initializes the complete physics-integrated PatchTST model with dual encoders and cross-group attention.
+        MSVLPatchTST.__init__
+        Purpose: Initializes the complete MSVL PatchTST model with dual encoders and cross-group attention.
         Input: configs - Configuration object with model parameters
         Output: None
         """
@@ -599,8 +599,8 @@ class PhysicsIntegratedPatchTST(nn.Module):
         
     def forward(self, x):
         """
-        PhysicsIntegratedPatchTST.forward
-        Purpose: Performs forward pass through the physics-integrated PatchTST model with group-specific encoding and cross-group attention.
+        MSVLPatchTST.forward
+        Purpose: Performs forward pass through the MSVL PatchTST model with group-specific encoding and cross-group attention.
         Input: x - [bs, seq_len, 23] tensor with 21 weather channels + 2 hour features
         Output: output - [bs, pred_len, 21] tensor with predictions for all 21 weather channels
         """

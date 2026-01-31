@@ -2,7 +2,7 @@
 Configuration for Physics-Integrated PatchTST with Predictor-Based Grouping
 """
 
-class PhysicsIntegratedConfig:
+class MSVLConfig:
     """
     Configuration class for Variable-Length PatchTST with Physics-Based Grouping
     and Hour-of-Day Integration
@@ -93,7 +93,7 @@ class PhysicsIntegratedConfig:
         self.moving_avg = 25
         self.do_predict = False
         self.itr = 1
-        self.des = 'PhysicsIntegratedExp'
+        self.des = 'MSVLExp'
         self.loss = 'mse'
 
     def _define_channel_groups(self):

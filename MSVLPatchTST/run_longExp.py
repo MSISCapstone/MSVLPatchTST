@@ -14,8 +14,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from MSVLPatchTST.config import PhysicsIntegratedConfig
-from MSVLPatchTST.models import PhysicsIntegratedPatchTST
+from MSVLPatchTST.config import MSVLConfig
+from MSVLPatchTST.models import MSVLPatchTST
 from MSVLPatchTST.trainer import train_model
 from MSVLPatchTST.evaluation import evaluate_model, evaluate_model_sliding_window
 from MSVLPatchTST.training_utils import get_target_indices, set_seed
@@ -31,7 +31,7 @@ def parse_args():
     # Basic config
     parser.add_argument('--is_training', type=int, default=1, help='status')
     parser.add_argument('--model_id', type=str, default='test', help='model id')
-    parser.add_argument('--model', type=str, default='PhysicsIntegratedPatchTST',
+    parser.add_argument('--model', type=str, default='MSVLPatchTST',
                         help='model name')
     
     # Data loader
@@ -117,7 +117,7 @@ def main():
     args = parse_args()
     
     # Create MSVLPatchTST config and update with command line arguments
-    config = PhysicsIntegratedConfig()
+    config = MSVLConfig()
     
     # Update config with command line arguments
     config.random_seed = args.random_seed
@@ -215,7 +215,7 @@ def main():
     
     # Create model
     print('\nInitializing MSVLPatchTST model...')
-    model = PhysicsIntegratedPatchTST(config).float().to(device)
+    model = MSVLPatchTST(config).float().to(device)
     
     # Print model architecture
     print('\n' + '='*80)

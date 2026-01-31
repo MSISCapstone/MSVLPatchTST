@@ -32,20 +32,25 @@ else
     fi
 fi
 
-if [ ! -d "$GIT_REPO_ROOT/output" ]; then
-    mkdir "$GIT_REPO_ROOT/output"
+# Create necessary directories for Original PatchTST outputs
+if [ ! -d "$GIT_REPO_ROOT/output/Original" ]; then
+    mkdir -p "$GIT_REPO_ROOT/output/Original"
 fi
 
-if [ ! -d "$GIT_REPO_ROOT/output/LongForecasting" ]; then
-    mkdir "$GIT_REPO_ROOT/output/LongForecasting"
+if [ ! -d "$GIT_REPO_ROOT/output/Original/logs" ]; then
+    mkdir -p "$GIT_REPO_ROOT/output/Original/logs"
 fi
 
-if [ ! -d "$GIT_REPO_ROOT/output/checkpoints" ]; then
-    mkdir "$GIT_REPO_ROOT/output/checkpoints"
+if [ ! -d "$GIT_REPO_ROOT/output/Original/checkpoints" ]; then
+    mkdir -p "$GIT_REPO_ROOT/output/Original/checkpoints"
 fi
 
-if [ ! -d "$GIT_REPO_ROOT/logs/LongForecasting" ]; then
-    mkdir -p "$GIT_REPO_ROOT/logs/LongForecasting"
+if [ ! -d "$GIT_REPO_ROOT/output/Original/results" ]; then
+    mkdir -p "$GIT_REPO_ROOT/output/Original/results"
+fi
+
+if [ ! -d "$GIT_REPO_ROOT/output/Original/test_results" ]; then
+    mkdir -p "$GIT_REPO_ROOT/output/Original/test_results"
 fi
 
 seq_len=336
@@ -64,7 +69,7 @@ echo "================================================================"
 
 for pred_len in 96
 do
-    log_file="$GIT_REPO_ROOT/output/LongForecasting/${model_name}_Baseline_${model_id_name}_${seq_len}_${pred_len}.log"
+    log_file="$GIT_REPO_ROOT/output/Original/logs/${model_name}_${model_id_name}_${seq_len}_${pred_len}.log"
     
     echo "========================================" | tee "$log_file"
     echo "Baseline PatchTST" | tee -a "$log_file"
@@ -95,7 +100,8 @@ do
       --des 'Exp' \
       --train_epochs 100 \
       --patience 20 \
-      --itr 1 --batch_size 128 --learning_rate 0.0001 > "$GIT_REPO_ROOT/logs/LongForecasting/${model_name}_${model_id_name}_${seq_len}_${pred_len}.log" 2>&1
+      --checkpoints "$GIT_REPO_ROOT/output/Original/checkpoints" \
+      --itr 1 --batch_size 128 --learning_rate 0.0001 >> "$log_file" 2>&1
     
     echo "========================================" | tee -a "$log_file"
     echo "Training completed for pred_len=${pred_len}" | tee -a "$log_file"
@@ -105,5 +111,5 @@ done
 
 echo ""
 echo "================================================================"
-echo "All experiments completed! Check $GIT_REPO_ROOT/output/LongForecasting/ for results"
+echo "All experiments completed! Check $GIT_REPO_ROOT/output/Original/ for results"
 echo "================================================================"

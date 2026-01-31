@@ -1,33 +1,33 @@
-# Physics-Integrated PatchTST
+# MSVLPatchTST (Multi-Scale Variable-Length PatchTST)
 
-Python package for Physics-Integrated PatchTST with variable-length patching, physics-based grouping, and hour-of-day integration.
+Python package for MSVLPatchTST with variable-length patching, physics-based grouping, and hour-of-day integration.
 
 ## Installation
 
-Add the PatchTST_physics_integrated directory to your Python path:
+Add the MSVLPatchTST directory to your Python path:
 
 ```python
 import sys
-sys.path.append('./PatchTST_physics_integrated')
+sys.path.append('./MSVLPatchTST')
 ```
 
 ## Quick Start
 
 ```python
 import torch
-from PatchTST_physics_integrated.config import PhysicsIntegratedConfig
-from PatchTST_physics_integrated.models import PhysicsIntegratedPatchTST
-from PatchTST_physics_integrated.utils import set_seed, get_target_indices, get_scheduler
-from PatchTST_physics_integrated.trainer import train_model
-from PatchTST_physics_integrated.evaluation import evaluate_model
+from MSVLPatchTST.config import MSVLConfig
+from MSVLPatchTST.models import MSVLPatchTST
+from MSVLPatchTST.training_utils import set_seed, get_target_indices, get_scheduler
+from MSVLPatchTST.trainer import train_model
+from MSVLPatchTST.evaluation import evaluate_model
 
 # Set seed for reproducibility
-args = PhysicsIntegratedConfig()
+args = MSVLConfig()
 set_seed(args.random_seed)
 
 # Create model
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = PhysicsIntegratedPatchTST(args).float().to(device)
+model = MSVLPatchTST(args).float().to(device)
 
 # Get target indices
 target_indices, target_names = get_target_indices(args.channel_groups)
@@ -74,10 +74,10 @@ The model predicts 7 key weather parameters:
 
 ## Configuration
 
-Customize your configuration by modifying `PhysicsIntegratedConfig`:
+Customize your configuration by modifying `MSVLConfig`:
 
 ```python
-args = PhysicsIntegratedConfig()
+args = MSVLConfig()
 args.seq_len = 512  # Input sequence length
 args.pred_len = 336  # Prediction length
 args.d_model = 128  # Model dimension

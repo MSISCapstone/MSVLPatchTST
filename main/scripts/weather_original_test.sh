@@ -67,7 +67,7 @@ fi
 
 # Create output directories
 mkdir -p "$OUTPUT_DIR"
-mkdir -p "$GIT_REPO_ROOT/logs/LongForecasting"
+mkdir -p "$GIT_REPO_ROOT/output/Original/logs"
 
 # Run test-only inference with sliding window prediction
 # 4 samples with stride=pred_len, giving 4 x 96 = 384 total predicted timesteps
@@ -114,7 +114,7 @@ echo "Original PatchTST inference finished!"
 echo "================================================================"
 
 # Run plotting and metrics generation
-PLOT_LOG="$GIT_REPO_ROOT/logs/LongForecasting/${model_name}_${model_id}_plot.log"
+PLOT_LOG="$GIT_REPO_ROOT/output/Original/logs/${model_name}_${model_id}_plot.log"
 echo ""
 echo "Running plotting and metrics generation (log: $PLOT_LOG)..."
 if ! (cd "$GIT_REPO_ROOT" && PYTHONPATH="$GIT_REPO_ROOT:$GIT_REPO_ROOT/PatchTST_supervised:${PYTHONPATH:-}" python -u "$GIT_REPO_ROOT/main/plot_original.py" \

@@ -129,7 +129,7 @@ def compute_feature_columns(root_path_name, data_path_name, target='OT'):
 
 
 def compute_test_data_statistics(root_path_name, data_path_name, data_columns, out_dir):
-    """Compute and save test data statistics per feature."""
+    """Compute and save test data statistics for TARGET features only."""
     path = Path(root_path_name) / data_path_name
     df = pd.read_csv(path)
     
@@ -140,7 +140,7 @@ def compute_test_data_statistics(root_path_name, data_path_name, data_columns, o
     test_df = df.iloc[border1:border2]
     
     stats = []
-    for col in data_columns:
+    for col in FEATURES_TO_PLOT:  # Only target features
         if col in test_df.columns:
             series = test_df[col]
             stats.append({
@@ -157,7 +157,7 @@ def compute_test_data_statistics(root_path_name, data_path_name, data_columns, o
     
     stats_df = pd.DataFrame(stats)
     stats_df.to_csv(Path(out_dir) / 'test_data_statistics.csv', index=False)
-    print(f"Saved test data statistics to {out_dir}/test_data_statistics.csv")
+    print(f"Saved test data statistics (target features) to {out_dir}/test_data_statistics.csv")
     return stats_df
 
 
@@ -178,11 +178,15 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
     preds_for_metrics = preds[:, :min_len, :]
     trues_for_metrics = trues[:, :min_len, :]
 
-    # Compute per-feature metrics (on overlapping portion)
+    # Compute per-feature metrics ONLY for target features (FEATURES_TO_PLOT)
     metrics = []
-    for idx, name in enumerate(data_columns):
+    for feat_name in FEATURES_TO_PLOT:
+        if feat_name not in data_columns:
+            print(f"Warning: Target feature '{feat_name}' not found in data columns")
+            continue
+        idx = data_columns.index(feat_name)
         if idx >= D:
-            break
+            continue
         p = preds_for_metrics[..., idx]
         t = trues_for_metrics[..., idx]
         mae = MAE(p, t)
@@ -190,7 +194,7 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         rmse = RMSE(p, t)
         rse = RSE(p, t)
         metrics.append({
-            'feature': name,
+            'feature': feat_name,
             'index': idx,
             'mae': float(mae),
             'mse': float(mse),
@@ -265,17 +269,24 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         fh.write(f'Prediction Length per sample: {actual_pred_len}\n')
         fh.write(f'Number of samples: {num_samples}\n')
         fh.write(f'Total predicted timesteps: {total_timesteps}\n')
-        fh.write(f'Number of features: {D}\n\n')
-        fh.write(f'Per-feature Metrics:\n')
+        fh.write(f'Number of target features: {len(FEATURES_TO_PLOT)}\n\n')
+        fh.write(f'Target Features: {FEATURES_TO_PLOT}\n\n')
+        fh.write(f'Per-feature Metrics (target features only):\n')
         fh.write('-' * 60 + '\n')
         fh.write(metrics_df.to_string(index=False))
         fh.write('\n\n')
         
-        # Overall metrics
-        overall_mae = MAE(preds_for_metrics, trues_for_metrics)
-        overall_mse = MSE(preds_for_metrics, trues_for_metrics)
-        overall_rmse = RMSE(preds_for_metrics, trues_for_metrics)
-        fh.write(f'Overall Metrics:\n')
+        # Overall metrics for TARGET FEATURES ONLY
+        target_indices = [data_columns.index(f) for f in FEATURES_TO_PLOT if f in data_columns and data_columns.index(f) < D]
+        if target_indices:
+            preds_target = preds_for_metrics[..., target_indices]
+            trues_target = trues_for_metrics[..., target_indices]
+            overall_mae = MAE(preds_target, trues_target)
+            overall_mse = MSE(preds_target, trues_target)
+            overall_rmse = RMSE(preds_target, trues_target)
+        else:
+            overall_mae = overall_mse = overall_rmse = float('nan')
+        fh.write(f'Overall Metrics (target features only):\n')
         fh.write('-' * 60 + '\n')
         fh.write(f'MAE: {overall_mae:.6f}\n')
         fh.write(f'MSE: {overall_mse:.6f}\n')
