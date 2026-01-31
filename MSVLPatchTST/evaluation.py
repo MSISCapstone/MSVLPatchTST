@@ -37,7 +37,7 @@ def metric(pred: np.ndarray, true: np.ndarray) -> Tuple[float, float, float, flo
 
 def evaluate_model(model, test_loader, device, args):
     """
-    Evaluate Physics-Integrated PatchTST on test set.
+    Evaluate MSVLPatchTST on test set.
     
     Args:
         model: The model to evaluate
@@ -48,8 +48,10 @@ def evaluate_model(model, test_loader, device, args):
     Returns:
         Dictionary with predictions, ground truth, and inputs
     """
-    from .training_utils import get_target_indices
-    target_indices, _ = get_target_indices(args.channel_groups)
+    # Get target input indices from model (p=0, T=1, wv=11, max.wv=12, rain=14, raining=15)
+    target_input_indices = []
+    for group_name in args.channel_groups.keys():
+        target_input_indices.extend(model.group_info[group_name].get('target_indices', []))
     
     model.eval()
     
@@ -62,12 +64,13 @@ def evaluate_model(model, test_loader, device, args):
             batch_x = batch_x.float().to(device)
             batch_y = batch_y.float().to(device)
             
-            # Forward pass
+            # Forward pass - outputs [bs, pred_len, 6] for 6 target features
             outputs = model(batch_x)
             
-            # Store predictions and ground truth for weather features only (c_out channels)
+            # Store predictions and ground truth for 6 target features only
             pred = outputs[:, -model.pred_len:, :].cpu().numpy()
-            true = batch_y[:, -model.pred_len:, :model.c_out].cpu().numpy()  # Only weather channels
+            # Extract ground truth for target features from batch_y
+            true = batch_y[:, -model.pred_len:, target_input_indices].cpu().numpy()
             inp = batch_x[:, :, :].cpu().numpy()
             
             preds.append(pred)
@@ -86,7 +89,7 @@ def evaluate_model(model, test_loader, device, args):
     # Calculate overall metrics
     mae, mse, rmse, mape, mspe, rse, corr = metric(preds, trues)
     
-    print(f"\nOverall Test Metrics:")
+    print(f"\nOverall Test Metrics (6 target features):")
     print(f"  MSE: {mse:.7f}")
     print(f"  MAE: {mae:.7f}")
     print(f"  RMSE: {rmse:.7f}")
@@ -111,7 +114,7 @@ def evaluate_model(model, test_loader, device, args):
 
 def evaluate_model_sliding_window(model, dataset, device, args, num_iterations=1, max_samples=None, window_stride=96):
     """
-    Evaluate Physics-Integrated PatchTST with sliding window prediction.
+    Evaluate MSVLPatchTST with sliding window prediction.
     
     Args:
         model: The model to evaluate
@@ -131,16 +134,19 @@ def evaluate_model_sliding_window(model, dataset, device, args, num_iterations=1
     Returns:
         Dictionary with predictions, ground truth, and metrics
     """
-    from .training_utils import get_target_indices
-    target_indices, _ = get_target_indices(args.channel_groups)
+    # Get target input indices from model (p=0, T=1, wv=11, max.wv=12, rain=14, raining=15)
+    target_input_indices = []
+    for group_name in args.channel_groups.keys():
+        target_input_indices.extend(model.group_info[group_name].get('target_indices', []))
     
     model.eval()
     pred_len = model.pred_len
     seq_len = args.seq_len
-    c_out = model.c_out
+    c_out = model.c_out  # 6 target features
     
     print(f"\nSliding window prediction with stride={window_stride}")
     print(f"Each sample: {seq_len}-step lookback → {pred_len}-step prediction")
+    print(f"Predicting {c_out} target features: indices {target_input_indices}")
     
     # Access raw data from dataset
     data_x = dataset.data_x  # Full normalized data [total_len, channels]
@@ -185,12 +191,12 @@ def evaluate_model_sliding_window(model, dataset, device, args, num_iterations=1
             seq_x = data_x[input_start:input_end]  # [seq_len, channels]
             seq_x = torch.FloatTensor(seq_x).unsqueeze(0).to(device)  # [1, seq_len, channels]
             
-            # Get ground truth
-            true_y = data_y[target_start:target_end, :c_out]  # [pred_len, c_out]
+            # Get ground truth for 6 target features only
+            true_y = data_y[target_start:target_end, target_input_indices]  # [pred_len, 6]
             
-            # Forward pass
-            outputs = model(seq_x)  # [1, pred_len, c_out]
-            pred = outputs[:, -pred_len:, :].cpu().numpy()[0]  # [pred_len, c_out]
+            # Forward pass - outputs [1, pred_len, 6]
+            outputs = model(seq_x)
+            pred = outputs[:, -pred_len:, :].cpu().numpy()[0]  # [pred_len, 6]
             
             all_preds.append(pred)
             all_trues.append(true_y)

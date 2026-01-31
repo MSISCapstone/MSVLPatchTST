@@ -50,17 +50,18 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
         'short': []
     }
     
-    print(f"\nStarting Physics-Integrated PatchTST Training...")
+    print(f"\nStarting MSVLPatchTST Training...")
     print(f"Checkpoint path: {checkpoint_path}")
     print("=" * 70)
     print(f"Input channels: {args.enc_in} (20 weather + 2 hour)")
-    print(f"Output channels: {args.c_out} (20 weather only)")
+    print(f"Output channels: {args.c_out} (6 target features)")
     print("─" * 70)
-    print(f"Physics Groups (with integrated hour features):")
+    print(f"Physics-Based Channel Groups:")
     for name, cfg in args.patch_configs.items():
         info = model.group_info[name]
-        hour_str = f" + hour" if len(info['hour_indices']) > 0 else ""
-        print(f"  {name}: {info['n_output']} weather{hour_str} → patch={cfg['patch_len']} , stride={cfg['stride']}")
+        target_names = args.channel_groups[name].get('target_names', [])
+        print(f"  {name}: {target_names}")
+        print(f"    → patch={cfg['patch_len']}, stride={cfg['stride']}, weight={cfg['weight']}")
     print("=" * 70)
     
     for epoch in range(args.train_epochs):
@@ -76,36 +77,42 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
             batch_x = batch_x.float().to(device)
             batch_y = batch_y.float().to(device)
             
-            # Forward pass
+            # Forward pass - outputs [bs, pred_len, 6] for 6 target features
             outputs = model(batch_x)
             
-            # Loss - compute only on weather features (first c_out channels)
-            # Model outputs: [bs, pred_len, c_out] where c_out=20 (weather only)
-            # batch_y: [bs, label_len+pred_len, enc_in] where enc_in=22 (weather+hour)
-            outputs_selected = outputs[:, -args.pred_len:, :]  # [bs, pred_len, 20]
-            batch_y_selected = batch_y[:, -args.pred_len:, :args.c_out]  # [bs, pred_len, 20]
+            # Get target input indices from model (p=0, T=1, wv=11, max.wv=12, rain=14, raining=15)
+            target_input_indices = []
+            for group_name in args.channel_groups.keys():
+                target_input_indices.extend(model.group_info[group_name].get('target_indices', []))
             
-            # Total loss across weather features only
-            loss = criterion(outputs_selected, batch_y_selected)
+            # Extract ground truth for target features only
+            # batch_y: [bs, label_len+pred_len, enc_in] where enc_in=22
+            # Select only the 6 target feature columns
+            batch_y_targets = batch_y[:, -args.pred_len:, target_input_indices]  # [bs, pred_len, 6]
+            
+            # Loss - MSE only on 6 target features
+            outputs_selected = outputs[:, -args.pred_len:, :]  # [bs, pred_len, 6]
+            
+            loss = criterion(outputs_selected, batch_y_targets)
             train_loss.append(loss.item())
             
-            # Per-group loss tracking (only on actual output channels)
+            # Per-group loss tracking
             with torch.no_grad():
                 for group_name in args.channel_groups.keys():
                     info = model.group_info[group_name]
                     output_indices = info['output_indices']
                     if len(output_indices) > 0:
-                        # Outputs are already aligned with output_indices
-                        # All groups output indices 0-19 (20 weather features)
-                        group_out = outputs[:, :, :]  # All outputs
-                        group_true = batch_y[:, -args.pred_len:, :args.c_out]  # First 20 weather features
+                        # Get outputs and ground truth for this group
+                        group_out = outputs[:, :, output_indices]  # [bs, pred_len, 3]
+                        group_true = batch_y_targets[:, :, output_indices]  # [bs, pred_len, 3]
                         group_loss = criterion(group_out, group_true)
                         batch_group_losses[group_name].append(group_loss.item())
                 
-                # Target variable losses (on 20 weather features)
-                # Both groups output the same 20 weather features
-                batch_target_losses['long'].append(loss.item())
-                batch_target_losses['short'].append(loss.item())
+                # Target variable losses per group
+                long_indices = model.group_info['long_channel']['output_indices']
+                short_indices = model.group_info['short_channel']['output_indices']
+                batch_target_losses['long'].append(criterion(outputs[:, :, long_indices], batch_y_targets[:, :, long_indices]).item())
+                batch_target_losses['short'].append(criterion(outputs[:, :, short_indices], batch_y_targets[:, :, short_indices]).item())
             
             # Backward pass
             loss.backward()

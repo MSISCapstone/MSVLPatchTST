@@ -504,19 +504,19 @@ class MSVLPatchTST(nn.Module):
         self.enc_in = configs.enc_in  # 22 (20 weather + 2 hour)
         self.channel_groups = configs.channel_groups
         self.patch_configs = configs.patch_configs
-        self.c_out = configs.c_out  # Output 20 weather channels
+        self.c_out = configs.c_out  # Output 6 target features
         self.hour_indices = set(configs.hour_feature_indices)  # {20, 21}
         self.use_cross_channel = configs.use_cross_channel_encoder  # New config option
         
         # Cross-group attention: disable if using cross-channel encoder (already captures dependencies)
         self.use_cross_group_attn = configs.use_cross_group_attention and not self.use_cross_channel
         
-        # RevIN for normalization (only for weather channels, not hour features)
+        # RevIN for normalization - normalize ALL 22 input channels for consistent scales
         self.revin = configs.revin
         if self.revin:
             from MSVLPatchTST.layers.RevIN import RevIN
-            # RevIN only for c_out channels (weather features), not hour features
-            self.revin_layer = RevIN(configs.c_out, affine=configs.affine, 
+            # RevIN for all input channels (22) to avoid scale imbalance
+            self.revin_layer = RevIN(configs.enc_in, affine=configs.affine, 
                                       subtract_last=configs.subtract_last)
         
         # Create encoder for each channel group
@@ -526,36 +526,32 @@ class MSVLPatchTST(nn.Module):
         for group_name, group_info in self.channel_groups.items():
             indices = group_info['indices']
             output_indices = group_info.get('output_indices', [])
+            target_indices = group_info.get('target_indices', [])  # Which input features to predict
             patch_config = self.patch_configs[group_name]
             
-            # Separate weather channels from hour channels in this group
-            weather_indices = [i for i in indices if i not in self.hour_indices]
-            hour_indices_in_group = [i for i in indices if i in self.hour_indices]
+            # Note: No fusion weights needed since each group predicts different features
             
-            # If output_indices is specified, only those channels are outputs
-            if output_indices:
-                actual_output_indices = output_indices
-            else:
-                actual_output_indices = weather_indices
+            # Number of outputs for this group
+            n_outputs = len(output_indices)
             
-            # Create mask: True for channels that should be output
-            output_mask = [i in actual_output_indices for i in indices]
+            # Create mask for which input channels produce outputs
+            # For target_indices: these are the input feature indices being predicted
+            output_mask = [i in target_indices for i in indices] if target_indices else [True] * len(indices)
             
             self.group_info[group_name] = {
                 'all_indices': indices,
-                'weather_indices': weather_indices,
-                'hour_indices': hour_indices_in_group,
-                'output_indices': actual_output_indices,
+                'target_indices': target_indices,  # Input indices being predicted
+                'output_indices': output_indices,  # Position in final output tensor
                 'output_mask': output_mask,
                 'n_input': len(indices),
-                'n_output': len(actual_output_indices)
+                'n_output': n_outputs
             }
             
             # Choose encoder based on configuration
             if self.use_cross_channel:
                 self.encoders[group_name] = CrossChannelEncoder(
                     n_input_channels=len(indices),
-                    n_output_channels=len(actual_output_indices),
+                    n_output_channels=n_outputs,
                     context_window=configs.seq_len,
                     target_window=configs.pred_len,
                     patch_len=patch_config['patch_len'],
@@ -569,7 +565,7 @@ class MSVLPatchTST(nn.Module):
             else:
                 self.encoders[group_name] = PerChannelEncoder(
                     n_input_channels=len(indices),
-                    n_output_channels=len(actual_output_indices),
+                    n_output_channels=n_outputs,
                     context_window=configs.seq_len,
                     target_window=configs.pred_len,
                     patch_len=patch_config['patch_len'],
@@ -602,34 +598,44 @@ class MSVLPatchTST(nn.Module):
         MSVLPatchTST.forward
         Purpose: Performs forward pass through the MSVL PatchTST model with group-specific encoding and cross-group attention.
         Input: x - [bs, seq_len, 22] tensor with 20 weather channels + 2 hour features
-        Output: output - [bs, pred_len, 20] tensor with predictions for all 20 weather channels
+        Output: output - [bs, pred_len, 6] tensor with predictions for 6 target features
+                         [p, T, wv, max.wv, rain, raining]
         """
         bs = x.shape[0]
+        
+        # Get target indices (the input feature indices we're predicting)
+        # long_channel targets: p=0, T=1, wv=11
+        # short_channel targets: max.wv=12, rain=14, raining=15
+        target_input_indices = []
+        for group_name in self.channel_groups.keys():
+            target_input_indices.extend(self.group_info[group_name].get('target_indices', []))
+        
+        # Apply RevIN normalization to ALL 22 input channels for consistent scales
+        if self.revin:
+            x = self.revin_layer(x, 'norm')  # Normalize all 22 channels
+            # Store mean/stdev for target channels only (for denormalization)
+            self._target_mean = self.revin_layer.mean[:, :, target_input_indices]  # [bs, 1, 6]
+            self._target_stdev = self.revin_layer.stdev[:, :, target_input_indices]  # [bs, 1, 6]
+            if self.revin_layer.affine:
+                self._target_affine_weight = self.revin_layer.affine_weight[target_input_indices]  # [6]
+                self._target_affine_bias = self.revin_layer.affine_bias[target_input_indices]  # [6]
         
         # Permute to [bs, enc_in, seq_len]
         x = x.permute(0, 2, 1)
         
-        # Apply RevIN normalization only to weather channels (first c_out channels)
-        if self.revin:
-            weather_x = x[:, :self.c_out, :]  # [bs, c_out, seq_len]
-            weather_x = weather_x.permute(0, 2, 1)  # [bs, seq_len, c_out]
-            weather_x = self.revin_layer(weather_x, 'norm')  # Normalize
-            weather_x = weather_x.permute(0, 2, 1)  # [bs, c_out, seq_len]
-            x[:, :self.c_out, :] = weather_x  # Put back normalized weather channels
-        
-        # Step 1: Group-independent encoding
+        # Step 1: Group-independent encoding (outputs are non-overlapping, so concatenate)
         all_outputs = torch.zeros(bs, self.c_out, self.pred_len, device=x.device)
         
         for group_name, encoder in self.encoders.items():
             info = self.group_info[group_name]
             
-            # Extract all channels for this group (including hour features)
+            # Extract all channels for this group (all 22 inputs)
             group_x = x[:, info['all_indices'], :]
             
-            # Encode - returns only specified output channels
+            # Encode - returns predictions for this group's targets
             group_out = encoder(group_x, info['output_mask'])
             
-            # Place outputs in correct positions
+            # Place outputs in correct positions (direct assignment, no weighting needed)
             for i, ch_idx in enumerate(info['output_indices']):
                 all_outputs[:, ch_idx, :] = group_out[:, i, :]
         
@@ -643,8 +649,16 @@ class MSVLPatchTST(nn.Module):
             alpha = torch.sigmoid(self.cross_group_weight)
             output = (1 - alpha) * output + alpha * cross_output
         
-        # Step 3: RevIN denormalization (only for weather channels)
+        # Step 3: RevIN denormalization (only for 6 target outputs using stored stats)
         if self.revin:
-            output = self.revin_layer(output, 'denorm')
+            # Manual denormalization using target-specific statistics
+            if self.revin_layer.affine:
+                output = output - self._target_affine_bias
+                output = output / (self._target_affine_weight + self.revin_layer.eps * self.revin_layer.eps)
+            output = output * self._target_stdev.squeeze(1)  # [bs, 6] -> broadcast
+            if self.revin_layer.subtract_last:
+                output = output + self._target_mean.squeeze(1)
+            else:
+                output = output + self._target_mean.squeeze(1)
         
         return output

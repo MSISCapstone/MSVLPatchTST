@@ -86,14 +86,14 @@ def get_target_indices(channel_groups: dict) -> Tuple[list, list]:
 
 def validate(model, val_loader, criterion, device, target_indices):
     """
-    Validation function for Physics-Integrated PatchTST.
+    Validation function for MSVLPatchTST.
     
     Args:
         model: The model to validate
         val_loader: Validation data loader
         criterion: Loss function
         device: Device to run on
-        target_indices: Indices of target channels
+        target_indices: Indices of target channels (not used, kept for compatibility)
         
     Returns:
         Average validation loss
@@ -101,18 +101,24 @@ def validate(model, val_loader, criterion, device, target_indices):
     model.eval()
     total_loss = []
     
+    # Get target input indices from model (p=0, T=1, wv=11, max.wv=12, rain=14, raining=15)
+    target_input_indices = []
+    for group_name in model.channel_groups.keys():
+        target_input_indices.extend(model.group_info[group_name].get('target_indices', []))
+    
     with torch.no_grad():
         for batch_x, batch_y, batch_x_mark, batch_y_mark in val_loader:
             batch_x = batch_x.float().to(device)
             batch_y = batch_y.float().to(device)
             
-            # Forward pass - outputs only weather channels (c_out)
-            outputs = model(batch_x)  # [bs, pred_len, c_out]
-            outputs_selected = outputs[:, -model.pred_len:, :]
-            # Only compare weather channels
-            batch_y_selected = batch_y[:, -model.pred_len:, :model.c_out]
+            # Forward pass - outputs [bs, pred_len, 6] for 6 target features
+            outputs = model(batch_x)
+            outputs_selected = outputs[:, -model.pred_len:, :]  # [bs, pred_len, 6]
             
-            loss = criterion(outputs_selected.cpu(), batch_y_selected.cpu())
+            # Extract ground truth for target features only
+            batch_y_targets = batch_y[:, -model.pred_len:, target_input_indices]  # [bs, pred_len, 6]
+            
+            loss = criterion(outputs_selected.cpu(), batch_y_targets.cpu())
             total_loss.append(loss.item())
     
     model.train()
