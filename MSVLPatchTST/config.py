@@ -4,7 +4,7 @@ Configuration for Physics-Integrated PatchTST with Predictor-Based Grouping
 
 class MSVLConfig:
     """
-    Configuration class for Variable-Length PatchTST with Physics-Based Grouping
+    Configuration class for Variable-Length PatchTST with Grouping
     and Hour-of-Day Integration
     """
     def __init__(self):
@@ -43,13 +43,9 @@ class MSVLConfig:
         # Variable-length patching configuration (Predictor-Based grouping)
         self.channel_groups = self._define_channel_groups()
         self.patch_configs = {
-            'short_channel': {'patch_len': 12, 'stride': 4, 'weight': 0.5},
+            'short_channel': {'patch_len': 8, 'stride': 4, 'weight': 0.5},
             'long_channel': {'patch_len': 16, 'stride': 8, 'weight': 0.5}
         }
-        
-        # Max pooling for long channel preprocessing
-        self.long_channel_pool_kernel = 4
-        self.long_channel_pool_stride = 1
 
         # Hour-of-day feature configuration (indices adjusted for enc_in=22, OT excluded)
         self.hour_feature_indices = [20, 21]  # hour_sin, hour_cos (indices after excluding OT)
@@ -84,7 +80,7 @@ class MSVLConfig:
         self.devices = '0'
 
         # Other
-        self.checkpoints = './checkpoints_physics_integrated'
+        self.checkpoints = './checkpoints_msvl'
         self.output_attention = False
         self.embed_type = 0
         self.activation = 'gelu'
@@ -97,7 +93,7 @@ class MSVLConfig:
         self.loss = 'mse'
 
     def _define_channel_groups(self):
-        """Define long and short channel grouping with physics-based feature assignment"""
+        """Define long and short channel grouping with feature assignment"""
         # All input feature names (22 total)
         full_names = [
             'p (mbar)', 'T (degC)', 'Tpot (K)', 'Tdew (degC)', 'rh (%)', 'VPmax (mbar)', 'VPact (mbar)',
@@ -106,19 +102,19 @@ class MSVLConfig:
             'Tlog (degC)', 'hour_sin', 'hour_cos'  # OT excluded
         ]
         
-        # Long channel targets: p (mbar), T (degC), wv (m/s)
+        # Long channel targets: p (mbar), T (degC), rain (mm)
         # These have slower dynamics - use larger patch size
-        long_target_indices = [0, 1, 11]  # p=0, T=1, wv=11
-        long_target_names = ['p (mbar)', 'T (degC)', 'wv (m/s)']
+        long_target_indices = [0, 1, 14]  # p=0, T=1, rain=14
+        long_target_names = ['p (mbar)', 'T (degC)', 'rain (mm)']
         
-        # Short channel targets: max. wv (m/s), rain (mm), raining (s)
+        # Short channel targets: wv (m/s), max. wv (m/s), raining (s)
         # These have faster dynamics - use smaller patch size
-        short_target_indices = [12, 14, 15]  # max.wv=12, rain=14, raining=15
-        short_target_names = ['max. wv (m/s)', 'rain (mm)', 'raining (s)']
+        short_target_indices = [11, 12, 15]  # wv=11, max.wv=12, raining=15
+        short_target_names = ['wv (m/s)', 'max. wv (m/s)', 'raining (s)']
         
         # Output indices in the final c_out=6 tensor:
-        # [0, 1, 2] = long channel targets (p, T, wv)
-        # [3, 4, 5] = short channel targets (max.wv, rain, raining)
+        # [0, 1, 2] = long channel targets (p, T, rain)
+        # [3, 4, 5] = short channel targets (wv, max.wv, raining)
 
         return {
             'long_channel': {
@@ -127,7 +123,7 @@ class MSVLConfig:
                 'target_indices': long_target_indices,  # Which input indices to predict
                 'target_names': long_target_names,
                 'output_indices': [0, 1, 2],  # Position in final output tensor
-                'description': 'Long-scale channel for slow dynamics (p, T, wv)'
+                'description': 'Long-scale channel for slow dynamics (p, T, rain)'
             },
             'short_channel': {
                 'indices': list(range(22)),  # All 22 inputs as predictors
@@ -135,6 +131,6 @@ class MSVLConfig:
                 'target_indices': short_target_indices,  # Which input indices to predict
                 'target_names': short_target_names,
                 'output_indices': [3, 4, 5],  # Position in final output tensor
-                'description': 'Short-scale channel for fast dynamics (max.wv, rain, raining)'
+                'description': 'Short-scale channel for fast dynamics (wv, max.wv, raining)'
             }
         }

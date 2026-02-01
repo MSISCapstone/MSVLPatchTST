@@ -56,7 +56,7 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, schedul
     print(f"Input channels: {args.enc_in} (20 weather + 2 hour)")
     print(f"Output channels: {args.c_out} (6 target features)")
     print("─" * 70)
-    print(f"Physics-Based Channel Groups:")
+    print(f"Channel Groups:")
     for name, cfg in args.patch_configs.items():
         info = model.group_info[name]
         target_names = args.channel_groups[name].get('target_names', [])

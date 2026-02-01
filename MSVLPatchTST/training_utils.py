@@ -69,17 +69,18 @@ def get_target_indices(channel_groups: dict) -> Tuple[list, list]:
         channel_groups: Dictionary of channel groups
         
     Returns:
-        target_indices: List of channel indices
-        target_names: List of channel names
+        target_indices: List of input feature indices being predicted
+        target_names: List of corresponding feature names
     """
     target_indices = []
     target_names = []
     
     for group in channel_groups.values():
-        for idx in group['output_indices']:
-            target_indices.append(idx)
-            name_idx = group['indices'].index(idx)
-            target_names.append(group['names'][name_idx])
+        # Use target_indices (input feature indices) and target_names from config
+        group_target_indices = group.get('target_indices', [])
+        group_target_names = group.get('target_names', [])
+        target_indices.extend(group_target_indices)
+        target_names.extend(group_target_names)
     
     return target_indices, target_names
 

@@ -92,6 +92,7 @@ python -u "$run_script" \
     --seq_len $seq_len \
     --pred_len $pred_len \
     --enc_in 22 \
+    --c_out 6 \
     --e_layers 3 \
     --n_heads 16 \
     --d_model 128 \

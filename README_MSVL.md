@@ -213,7 +213,7 @@ Input: [batch, seq_len=336, channels=22]
 │ Encoder      │ │ Encoder      │         │
 │              │ │              │         │
 │ Targets:     │ │ Targets:     │         │
-│ p, T, wv     │ │ max.wv, rain │         │
+│ p, T, rain   │ │ wv, max.wv,  │         │
 │              │ │ raining      │         │
 │ patch_len=16 │ │ patch_len=12 │         │
 │ stride=8     │ │ stride=4     │         │
@@ -245,7 +245,7 @@ Input: [batch, seq_len=336, channels=22]
 ┌─────────────────────────────────────────┐
 │  Cross-Group Attention                  │
 │  - Learn inter-variable dependencies    │
-│  - p, T, wv ↔ max.wv, rain, raining    │
+│  - p, T, rain ↔ wv, max.wv, raining   │
 └─────────────────────────────────────────┘
     │
     ▼
@@ -262,14 +262,14 @@ Input: [batch, seq_len=336, channels=22]
     │
     ▼
 Output: [batch, pred_len=96, channels=6]
-        (6 target features: p, T, wv, max.wv, rain, raining)
+        (6 target features: p, T, rain, wv, max.wv, raining)
 ```
 
 **Key characteristics:**
 - Multi-scale patching: Long (16) for slow dynamics, Short (12) for fast dynamics
-- Physics-based grouping: 
-  - Long channel: p, T, wv (slow dynamics)
-  - Short channel: max.wv, rain, raining (fast dynamics)
+- Grouping: 
+  - Long channel: p, T, rain (slow dynamics)
+  - Short channel: wv, max.wv, raining (fast dynamics)
 - Hour integration: sin/cos hour features in all encoders
 - Cross-group attention: Learns physical couplings between groups
 - MSE optimized only on 6 target features
@@ -283,7 +283,7 @@ Output: [batch, pred_len=96, channels=6]
 | Output channels | 21 | 6 (target features only) |
 | Patching | Single-scale (16) | Multi-scale (12, 16) |
 | Hour embedding | None | Integrated (sin/cos) |
-| Channel grouping | Independent | Physics-based groups |
+| Channel grouping | Independent | Groups |
 | Cross-group attention | No | Yes |
 | MSE optimized on | All 21 channels | 6 target features |
 

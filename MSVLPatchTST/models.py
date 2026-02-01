@@ -599,13 +599,13 @@ class MSVLPatchTST(nn.Module):
         Purpose: Performs forward pass through the MSVL PatchTST model with group-specific encoding and cross-group attention.
         Input: x - [bs, seq_len, 22] tensor with 20 weather channels + 2 hour features
         Output: output - [bs, pred_len, 6] tensor with predictions for 6 target features
-                         [p, T, wv, max.wv, rain, raining]
+                         [p, T, rain, wv, max.wv, raining]
         """
         bs = x.shape[0]
         
         # Get target indices (the input feature indices we're predicting)
-        # long_channel targets: p=0, T=1, wv=11
-        # short_channel targets: max.wv=12, rain=14, raining=15
+        # long_channel targets: p=0, T=1, rain=14
+        # short_channel targets: wv=11, max.wv=12, raining=15
         target_input_indices = []
         for group_name in self.channel_groups.keys():
             target_input_indices.extend(self.group_info[group_name].get('target_indices', []))
@@ -652,13 +652,15 @@ class MSVLPatchTST(nn.Module):
         # Step 3: RevIN denormalization (only for 6 target outputs using stored stats)
         if self.revin:
             # Manual denormalization using target-specific statistics
+            # output shape: [bs, pred_len, 6]
+            # _target_stdev/_target_mean shape: [bs, 1, 6] -> broadcasts over pred_len
             if self.revin_layer.affine:
-                output = output - self._target_affine_bias
+                output = output - self._target_affine_bias  # [6] broadcasts to [bs, pred_len, 6]
                 output = output / (self._target_affine_weight + self.revin_layer.eps * self.revin_layer.eps)
-            output = output * self._target_stdev.squeeze(1)  # [bs, 6] -> broadcast
+            output = output * self._target_stdev  # [bs, 1, 6] broadcasts to [bs, pred_len, 6]
             if self.revin_layer.subtract_last:
-                output = output + self._target_mean.squeeze(1)
+                output = output + self._target_mean
             else:
-                output = output + self._target_mean.squeeze(1)
+                output = output + self._target_mean
         
         return output

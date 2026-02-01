@@ -1,6 +1,6 @@
 # MSVLPatchTST (Multi-Scale Variable-Length PatchTST)
 
-Python package for MSVLPatchTST with variable-length patching, physics-based grouping, and hour-of-day integration.
+Python package for MSVLPatchTST with variable-length patching, grouping, and hour-of-day integration.
 
 ## Installation
 
@@ -50,7 +50,7 @@ results = evaluate_model(model, test_loader, device, args)
 
 ## Module Structure
 
-- `config.py` - Configuration class with physics-based channel grouping
+- `config.py` - Configuration class with channel grouping
 - `models.py` - Physics-Integrated PatchTST model architecture
 - `utils.py` - Utility functions (seed setting, validation, scheduling)
 - `trainer.py` - Training loop

@@ -32,9 +32,9 @@ from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE
 FEATURES_TO_PLOT = [
     'p (mbar)',
     'T (degC)',
+    'rain (mm)',
     'wv (m/s)',
     'max. wv (m/s)',
-    'rain (mm)',
     'raining (s)'
 ]
 
@@ -356,11 +356,18 @@ def main():
         print(f"Truncated to {n_features} features")
 
     # Get feature column names
-    data_columns = compute_feature_columns(root_path_name, args.data_file)
-    # Adjust columns to match actual prediction dimensions
-    if len(data_columns) > preds.shape[-1]:
-        data_columns = data_columns[:preds.shape[-1]]
-    print(f"Data columns ({len(data_columns)}): {data_columns[:5]}...")
+    # For MSVLPatchTST, predictions have exactly 6 target features in order: 
+    # [p, T, wv, max.wv, rain, raining]
+    # Use FEATURES_TO_PLOT directly since that's what the model outputs
+    if preds.shape[-1] == len(FEATURES_TO_PLOT):
+        data_columns = FEATURES_TO_PLOT.copy()
+        print(f"Using target feature names ({len(data_columns)}): {data_columns}")
+    else:
+        # Fallback: read from CSV (for original PatchTST compatibility)
+        data_columns = compute_feature_columns(root_path_name, args.data_file)
+        if len(data_columns) > preds.shape[-1]:
+            data_columns = data_columns[:preds.shape[-1]]
+        print(f"Data columns ({len(data_columns)}): {data_columns[:5]}...")
 
     # Save test data statistics
     compute_test_data_statistics(root_path_name, args.data_file, data_columns, out_dir)

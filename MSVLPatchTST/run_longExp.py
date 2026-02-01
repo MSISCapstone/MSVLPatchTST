@@ -54,7 +54,7 @@ def parse_args():
     # Model define
     parser.add_argument('--enc_in', type=int, default=21, help='encoder input size')
     parser.add_argument('--dec_in', type=int, default=21, help='decoder input size')
-    parser.add_argument('--c_out', type=int, default=21, help='output size')
+    parser.add_argument('--c_out', type=int, default=6, help='output size (6 target features)')
     parser.add_argument('--d_model', type=int, default=128, help='dimension of model')
     parser.add_argument('--n_heads', type=int, default=16, help='num of heads')
     parser.add_argument('--e_layers', type=int, default=3, help='num of encoder layers')
@@ -267,8 +267,8 @@ def main():
             checkpoint_path = '.'
         checkpoint_dir = checkpoint_path
     else:
-        # Construct checkpoint directory with MSVLPatchTST subfolder
-        checkpoint_dir = os.path.join(config.checkpoints, 'MSVLPatchTST', f'{args.model_id}')
+        # Construct checkpoint directory
+        checkpoint_dir = os.path.join(config.checkpoints, f'{args.model_id}')
         checkpoint_path = checkpoint_dir
     os.makedirs(checkpoint_dir, exist_ok=True)
     

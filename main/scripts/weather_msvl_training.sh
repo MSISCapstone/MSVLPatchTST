@@ -91,6 +91,7 @@ do
       --seq_len $seq_len \
       --pred_len $pred_len \
       --enc_in 22 \
+      --c_out 6 \
       --e_layers 3 \
       --n_heads 16 \
       --d_model 128 \
@@ -102,7 +103,7 @@ do
       --stride 8 \
       --des 'Exp' \
       --train_epochs 100 \
-      --patience 20 \
+      --patience 3 \
       --checkpoints "$GIT_REPO_ROOT/output/MSVLPatchTST/checkpoints" \
       --itr 1 --batch_size 128 --learning_rate 0.0001 >> "$log_file" 2>&1
     
