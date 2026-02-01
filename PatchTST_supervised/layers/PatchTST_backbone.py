@@ -20,7 +20,6 @@ class PatchTST_backbone(nn.Module):
                  padding_var:Optional[int]=None, attn_mask:Optional[Tensor]=None, res_attention:bool=True, pre_norm:bool=False, store_attn:bool=False,
                  pe:str='zeros', learn_pe:bool=True, fc_dropout:float=0., head_dropout = 0, padding_patch = None,
                  pretrain_head:bool=False, head_type = 'flatten', individual = False, revin = True, affine = True, subtract_last = False,
-                 channel_independent:bool=True,  # NEW PARAMETER
                  verbose:bool=False, **kwargs):
         
         super().__init__()
@@ -38,15 +37,8 @@ class PatchTST_backbone(nn.Module):
             self.padding_patch_layer = nn.ReplicationPad1d((0, stride)) 
             patch_num += 1
         
-        # Backbone - choose between channel-independent or channel-dependent
-        if channel_independent:
-            self.backbone = TSTiEncoder(c_in, patch_num=patch_num, patch_len=patch_len, max_seq_len=max_seq_len,
-                                n_layers=n_layers, d_model=d_model, n_heads=n_heads, d_k=d_k, d_v=d_v, d_ff=d_ff,
-                                attn_dropout=attn_dropout, dropout=dropout, act=act, key_padding_mask=key_padding_mask, padding_var=padding_var,
-                                attn_mask=attn_mask, res_attention=res_attention, pre_norm=pre_norm, store_attn=store_attn,
-                                pe=pe, learn_pe=learn_pe, verbose=verbose, **kwargs)
-        else:
-            self.backbone = TSTdEncoder(c_in, patch_num=patch_num, patch_len=patch_len, max_seq_len=max_seq_len,
+        # Backbone 
+        self.backbone = TSTiEncoder(c_in, patch_num=patch_num, patch_len=patch_len, max_seq_len=max_seq_len,
                                 n_layers=n_layers, d_model=d_model, n_heads=n_heads, d_k=d_k, d_v=d_v, d_ff=d_ff,
                                 attn_dropout=attn_dropout, dropout=dropout, act=act, key_padding_mask=key_padding_mask, padding_var=padding_var,
                                 attn_mask=attn_mask, res_attention=res_attention, pre_norm=pre_norm, store_attn=store_attn,
@@ -176,76 +168,6 @@ class TSTiEncoder(nn.Module):  #i means channel-independent
         z = self.encoder(u)                                                      # z: [bs * nvars x patch_num x d_model]
         z = torch.reshape(z, (-1,n_vars,z.shape[-2],z.shape[-1]))                # z: [bs x nvars x patch_num x d_model]
         z = z.permute(0,1,3,2)                                                   # z: [bs x nvars x d_model x patch_num]
-        
-        return z
-    
-
-class TSTdEncoder(nn.Module):  #d means channel-dependent (cross-channel)
-    def __init__(self, c_in, patch_num, patch_len, max_seq_len=1024,
-                 n_layers=3, d_model=128, n_heads=16, d_k=None, d_v=None,
-                 d_ff=256, norm='BatchNorm', attn_dropout=0., dropout=0., act="gelu", store_attn=False,
-                 key_padding_mask='auto', padding_var=None, attn_mask=None, res_attention=True, pre_norm=False,
-                 pe='zeros', learn_pe=True, verbose=False, **kwargs):
-        
-        super().__init__()
-        
-        self.patch_num = patch_num
-        self.patch_len = patch_len
-        self.n_vars = c_in
-        self.d_model = d_model
-        
-        # Input encoding
-        q_len = patch_num
-        self.W_P = nn.Linear(patch_len, d_model)
-        self.seq_len = q_len
-
-        # Positional encoding (will be expanded for all channels)
-        self.W_pos = positional_encoding(pe, learn_pe, q_len, d_model)
-        
-        # Channel embedding to distinguish different variables
-        self.channel_embedding = nn.Embedding(c_in, d_model)
-
-        # Residual dropout
-        self.dropout = nn.Dropout(dropout)
-
-        # Encoder - operates on joint channel-patch sequence
-        # Sequence length is now (nvars * patch_num)
-        self.encoder = TSTEncoder(q_len * c_in, d_model, n_heads, 
-                                   d_k=d_k, d_v=d_v, d_ff=d_ff, 
-                                   norm=norm, attn_dropout=attn_dropout, 
-                                   dropout=dropout, pre_norm=pre_norm, 
-                                   activation=act, res_attention=res_attention, 
-                                   n_layers=n_layers, store_attn=store_attn)
-        
-    def forward(self, x) -> Tensor:  # x: [bs x nvars x patch_len x patch_num]
-        bs, n_vars, patch_len, patch_num = x.shape
-        
-        # Input encoding
-        x = x.permute(0, 1, 3, 2)  # x: [bs x nvars x patch_num x patch_len]
-        x = self.W_P(x)  # x: [bs x nvars x patch_num x d_model]
-        
-        # Add channel embeddings to distinguish variables
-        channel_ids = torch.arange(n_vars, device=x.device)
-        channel_emb = self.channel_embedding(channel_ids)  # [nvars x d_model]
-        x = x + channel_emb.unsqueeze(0).unsqueeze(2)  # broadcast: [bs x nvars x patch_num x d_model]
-        
-        # Reshape to enable cross-channel attention
-        # Instead of (bs*nvars, patch_num, d_model), use:
-        x = x.reshape(bs, n_vars * patch_num, self.d_model)  
-        # x: [bs x (nvars * patch_num) x d_model]
-        # Now attention can operate across all patches from all channels
-        
-        # Expand positional encoding for all channels
-        # Repeat positional encoding for each channel
-        W_pos_expanded = self.W_pos.repeat(1, n_vars, 1)  # [1 x (nvars*patch_num) x d_model]
-        x = self.dropout(x + W_pos_expanded)
-        
-        # Encoder with cross-channel attention
-        z = self.encoder(x)  # z: [bs x (nvars * patch_num) x d_model]
-        
-        # Reshape back to separate channels
-        z = z.reshape(bs, n_vars, patch_num, self.d_model)
-        z = z.permute(0, 1, 3, 2)  # z: [bs x nvars x d_model x patch_num]
         
         return z    
             
