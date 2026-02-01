@@ -27,7 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from PatchTST_supervised.data_provider.data_factory import data_provider
-from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE
+from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE, MAPE, MSPE
 
 FEATURES_TO_PLOT = [
     'p (mbar)',
@@ -180,13 +180,23 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         mse = MSE(p, t)
         rmse = RMSE(p, t)
         rse = RSE(p, t)
+        # MAPE and MSPE with protection against division by zero
+        mask = np.abs(t) > 1e-8
+        if mask.sum() > 0:
+            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100  # as percentage
+            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100  # as percentage
+        else:
+            mape = float('nan')
+            mspe = float('nan')
         metrics.append({
             'feature': feat_name,
             'index': idx,
             'mae': float(mae),
             'mse': float(mse),
             'rmse': float(rmse),
-            'rse': float(rse)
+            'rse': float(rse),
+            'mape': float(mape),
+            'mspe': float(mspe)
         })
     
     metrics_df = pd.DataFrame(metrics)
@@ -227,6 +237,14 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         # Compute metrics
         mae = MAE(p, t)
         mse = MSE(p, t)
+        # MAPE and MSPE with protection against division by zero
+        mask = np.abs(t) > 1e-8
+        if mask.sum() > 0:
+            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100
+            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100
+        else:
+            mape = float('nan')
+            mspe = float('nan')
 
         # Plot continuous time series
         ax.plot(x_axis, continuous_true, label='Ground Truth', linewidth=1.5, color='blue', alpha=0.8)
@@ -236,7 +254,7 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         for i in range(1, num_samples):
             ax.axvline(x=i * actual_pred_len, color='gray', linestyle='--', alpha=0.3)
         
-        ax.set_title(f"{feat_name}\nMAE={mae:.4f}, MSE={mse:.4f}")
+        ax.set_title(f"{feat_name}\nMAE={mae:.4f}, MSE={mse:.4f}, MAPE={mape:.2f}%, MSPE={mspe:.2f}%")
         ax.legend(loc='upper right', fontsize=8)
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Value (normalized)')
@@ -271,13 +289,23 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
             overall_mae = MAE(preds_target, trues_target)
             overall_mse = MSE(preds_target, trues_target)
             overall_rmse = RMSE(preds_target, trues_target)
+            # Overall MAPE and MSPE with protection against division by zero
+            mask = np.abs(trues_target) > 1e-8
+            if mask.sum() > 0:
+                overall_mape = np.mean(np.abs((preds_target[mask] - trues_target[mask]) / trues_target[mask])) * 100
+                overall_mspe = np.mean(np.square((preds_target[mask] - trues_target[mask]) / trues_target[mask])) * 100
+            else:
+                overall_mape = float('nan')
+                overall_mspe = float('nan')
         else:
-            overall_mae = overall_mse = overall_rmse = float('nan')
+            overall_mae = overall_mse = overall_rmse = overall_mape = overall_mspe = float('nan')
         fh.write(f'Overall Metrics (target features only):\n')
         fh.write('-' * 60 + '\n')
         fh.write(f'MAE: {overall_mae:.6f}\n')
         fh.write(f'MSE: {overall_mse:.6f}\n')
         fh.write(f'RMSE: {overall_rmse:.6f}\n')
+        fh.write(f'MAPE: {overall_mape:.2f}%\n')
+        fh.write(f'MSPE: {overall_mspe:.2f}%\n')
 
     print(f"Saved summary to {out_dir}/summary.txt")
 
