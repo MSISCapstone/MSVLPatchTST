@@ -165,8 +165,7 @@ class CrossChannelEncoder(nn.Module):
     - Can learn shared temporal patterns across variables
     """
     def __init__(self, n_input_channels, n_output_channels, context_window, target_window,
-                 patch_len, stride, d_model=128, n_heads=8,
-                 dropout=0.2, head_dropout=0.0, padding_patch='end'):
+                 patch_len, stride, d_model, n_heads, dropout, head_dropout=0.0, padding_patch='end'):
         """
         CrossChannelEncoder.__init__
         Purpose: Initializes cross-channel encoder that processes all channels together.
@@ -289,8 +288,7 @@ class PerChannelEncoder(nn.Module):
     Uses custom multi-head attention per channel.
     """
     def __init__(self, n_input_channels, n_output_channels, context_window, target_window, 
-                 patch_len, stride, d_model=128, n_heads=8, 
-                 dropout=0.2, head_dropout=0.0, padding_patch='end'):
+                 patch_len, stride, d_model, n_heads, dropout, head_dropout=0.0, padding_patch='end'):
         """
         PerChannelEncoder.__init__
         Purpose: Initializes per-channel encoder for a group of weather channels with custom attention.
@@ -399,7 +397,7 @@ class CrossGroupAttention(nn.Module):
     - Pressure gradients -> Wind
     - Temperature -> Convection -> Rain
     """
-    def __init__(self, n_channels, d_model, n_heads=4, dropout=0.1):
+    def __init__(self, n_channels, d_model, n_heads, dropout):
         """
         CrossGroupAttention.__init__
         Purpose: Initializes cross-group attention module for fusing long and short channel predictions.
@@ -587,7 +585,7 @@ class MSVLPatchTST(nn.Module):
             self.cross_group_attn = CrossGroupAttention(
                 n_channels=self.c_out,  # Dynamic
                 d_model=configs.d_model // 2,
-                n_heads=4,
+                n_heads=configs.n_heads // 4,
                 dropout=configs.dropout
             )
             # Learnable mixing weight
