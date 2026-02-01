@@ -3,8 +3,8 @@
 Plotting helper for the Original PatchTST experiments.
 
 - Creates a 2x3 figure with the following layout:
-  Row 1: 'p (mbar)', 'T (degC)', 'wv (m/s)'
-  Row 2: 'max. wv (m/s)', 'rain (mm)', 'raining (s)'
+  Row 1: 'p (mbar)', 'T (degC)', 'rain (mm)'
+  Row 2: 'wv (m/s)', 'max. wv (m/s)', 'raining (s)'
 
 - Reads predictions from a results folder (expects `pred.npy` saved by experiments)
 - Reconstructs ground-truth test values by loading the dataset
@@ -32,9 +32,9 @@ from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE
 FEATURES_TO_PLOT = [
     'p (mbar)',
     'T (degC)',
+    'rain (mm)',
     'wv (m/s)',
     'max. wv (m/s)',
-    'rain (mm)',
     'raining (s)'
 ]
 
