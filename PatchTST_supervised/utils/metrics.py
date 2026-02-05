@@ -32,6 +32,27 @@ def MSPE(pred, true):
     return np.mean(np.square((pred - true) / true))
 
 
+def SMAPE(pred, true):
+    """Symmetric Mean Absolute Percentage Error"""
+    numerator = np.abs(pred - true)
+    denominator = (np.abs(pred) + np.abs(true)) / 2
+    # Avoid division by zero
+    mask = denominator > 1e-8
+    if mask.sum() > 0:
+        return np.mean(numerator[mask] / denominator[mask]) * 100
+    else:
+        return float('nan')
+
+
+def HuberLoss(pred, true, delta=1.0):
+    """Huber Loss - robust to outliers"""
+    error = pred - true
+    abs_error = np.abs(error)
+    quadratic = np.minimum(abs_error, delta)
+    linear = abs_error - quadratic
+    return np.mean(0.5 * quadratic ** 2 + delta * linear)
+
+
 def metric(pred, true):
     mae = MAE(pred, true)
     mse = MSE(pred, true)
