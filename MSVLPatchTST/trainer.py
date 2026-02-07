@@ -1,5 +1,5 @@
 """
-Training module for Physics-Integrated PatchTST
+Training module for MSVL PatchTST
 """
 
 import torch
@@ -13,7 +13,7 @@ from .training_utils import validate, adjust_learning_rate
 def train_model(model, train_loader, val_loader, test_loader, optimizer, scheduler, 
                 criterion, args, device, target_indices, checkpoint_path):
     """
-    Training loop for Physics-Integrated PatchTST.
+    Training loop for MSVL PatchTST.
     
     Args:
         model: The model to train
