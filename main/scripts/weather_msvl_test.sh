@@ -174,10 +174,10 @@ fi
 echo ""
 echo "================================================================"
 echo "All outputs saved to: $OUTPUT_DIR"
-echo "  - per_feature_metrics.csv"
-echo "  - test_data_statistics.csv"
+echo "  - per_feature_metrics_sl${seq_len}_pl${pred_len}_sp${patch_len_short}_ss${stride_short}_lp${patch_len_long}_ls${stride_long}.csv"
+echo "  - test_data_statistics_sl${seq_len}_pl${pred_len}_sp${patch_len_short}_ss${stride_short}_lp${patch_len_long}_ls${stride_long}.csv"
 echo "  - prediction_grid_sl${seq_len}_pl${pred_len}_sp${patch_len_short}_ss${stride_short}_lp${patch_len_long}_ls${stride_long}.png"
-echo "  - summary.txt"
+echo "  - summary_sl${seq_len}_pl${pred_len}_sp${patch_len_short}_ss${stride_short}_lp${patch_len_long}_ls${stride_long}.txt"
 echo "================================================================"
 
 exit 0

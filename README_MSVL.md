@@ -133,13 +133,14 @@ After running test scripts, you'll find:
 **MSVLPatchTST** (example with short 16/8, long 32/16):
 ```
 output/MSVLPatchTST/test_results/weather_336_96_sp16_ss8_lp32_ls16/
-├── pred.npy                              # Predictions array
-├── true.npy                              # Ground truth array
-├── predictions.csv                       # Combined predictions CSV
-├── per_feature_metrics.csv               # MAE, MSE, RMSE, RSE per target feature
-├── test_data_statistics.csv              # Test data statistics
-├── prediction_grid_sl336_pl96_sp16_ss8_lp32_ls16.png  # 2x3 plot grid
-└── summary.txt                           # Overall metrics summary
+├── pred_sl336_pl96_sp16_ss8_lp32_ls16.npy                   # Predictions array
+├── true_sl336_pl96_sp16_ss8_lp32_ls16.npy                   # Ground truth array
+├── predictions_sl336_pl96_sp16_ss8_lp32_ls16.csv            # Combined predictions CSV
+├── per_feature_metrics_sl336_pl96_sp16_ss8_lp32_ls16.csv    # MAE, MSE, RMSE, RSE per target feature
+├── test_data_statistics_sl336_pl96_sp16_ss8_lp32_ls16.csv   # Test data statistics
+├── prediction_grid_sl336_pl96_sp16_ss8_lp32_ls16.png        # 2x3 plot grid
+├── summary_sl336_pl96_sp16_ss8_lp32_ls16.txt                # Overall metrics summary
+└── results_sl336_pl96_sp16_ss8_lp32_ls16.txt                # Basic results from inference
 ```
 
 **Original PatchTST**:
@@ -319,7 +320,7 @@ Output: [batch, pred_len=96, channels=6]
 ./main/scripts/weather_original_test.sh
 
 # 4. Check results
-cat output/MSVLPatchTST/test_results/weather_336_96_sp16_ss8_lp16_ls8/summary.txt
+cat output/MSVLPatchTST/test_results/weather_336_96_sp16_ss8_lp16_ls8/summary_sl336_pl96_sp16_ss8_lp16_ls8.txt
 cat output/Original/test_results/weather_336_96/summary.txt
 ```
 

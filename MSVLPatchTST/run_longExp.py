@@ -363,17 +363,25 @@ def main():
     # Create output directory structure: output/MSVLPatchTST/test_results/weather_336_96/
     results_dir = os.path.join(git_root, 'output', 'MSVLPatchTST', 'test_results', args.model_id)
     os.makedirs(results_dir, exist_ok=True)
-    results_file = os.path.join(results_dir, 'results.txt')
+    
+    # Build file suffix from patch/stride config
+    patch_len_short = config.patch_configs['short_channel']['patch_len']
+    stride_short = config.patch_configs['short_channel']['stride']
+    patch_len_long = config.patch_configs['long_channel']['patch_len']
+    stride_long = config.patch_configs['long_channel']['stride']
+    file_suffix = f'_sl{config.seq_len}_pl{config.pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}'
+    
+    results_file = os.path.join(results_dir, f'results{file_suffix}.txt')
     
     # Save pred.npy for plotting script
     try:
-        pred_file = os.path.join(results_dir, 'pred.npy')
+        pred_file = os.path.join(results_dir, f'pred{file_suffix}.npy')
         np.save(pred_file, results['preds'])
         print(f'Saved predictions to: {pred_file}')
         print(f'Predictions shape: {results["preds"].shape}')
         
         # Also save ground truth for plotting
-        true_file = os.path.join(results_dir, 'true.npy')
+        true_file = os.path.join(results_dir, f'true{file_suffix}.npy')
         np.save(true_file, results['trues'])
         print(f'Saved ground truth to: {true_file}')
         
@@ -397,7 +405,7 @@ def main():
                     })
         
         csv_df = pd.DataFrame(rows)
-        csv_file = os.path.join(results_dir, 'predictions.csv')
+        csv_file = os.path.join(results_dir, f'predictions{file_suffix}.csv')
         csv_df.to_csv(csv_file, index=False)
         print(f'Saved combined predictions CSV to: {csv_file}')
         print(f'CSV shape: {len(csv_df)} rows ({num_samples} samples x {pred_len_actual} steps x {num_features} features)')

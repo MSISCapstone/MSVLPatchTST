@@ -244,12 +244,8 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         
         # Compute metrics
         huber = HuberLoss(p, t, delta=1.0)
-        # MAPE with protection against division by zero
-        mask = np.abs(t) > 1e-8
-        if mask.sum() > 0:
-            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100
-        else:
-            mape = float('nan')
+        mse = np.mean((p - t) ** 2)
+        mae = np.mean(np.abs(p - t))
 
         # Plot continuous time series
         ax.plot(x_axis, continuous_true, label='Ground Truth', linewidth=1.5, color='blue', alpha=0.8)
@@ -259,7 +255,7 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         for i in range(1, num_samples):
             ax.axvline(x=i * actual_pred_len, color='gray', linestyle='--', alpha=0.3)
         
-        ax.set_title(f"{feat_name}\nHuber={huber:.4f}, MAPE={mape:.2f}%")
+        ax.set_title(f"{feat_name}\nHuber={huber:.4f}, MSE={mse:.4f}, MAE={mae:.4f}")
         ax.legend(loc='upper right', fontsize=8)
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Value (normalized)')
