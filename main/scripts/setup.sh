@@ -10,7 +10,7 @@ echo "Setting up environment for PatchTST..."
 echo "Project root: $GIT_REPO_ROOT"
 
 # Check if running in Google Colab (skip venv if so)
-if [ -n "$COLAB_RELEASE_TAG" ] || [ -d "/content" ]; then
+if [ -n "${COLAB_RELEASE_TAG:-}" ] || [ -d "/content" ]; then
     echo "Running in Google Colab, skipping venv setup"
     IN_COLAB=1
 else

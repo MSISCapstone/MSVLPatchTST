@@ -11,7 +11,7 @@ set -euo pipefail
 GIT_REPO_ROOT=$(git rev-parse --show-toplevel)
 
 # Check if running in Google Colab (skip venv if so)
-if [ -n "$COLAB_RELEASE_TAG" ] || [ -d "/content" ]; then
+if [ -n "${COLAB_RELEASE_TAG:-}" ] || [ -d "/content" ]; then
     echo "Running in Google Colab, skipping venv activation"
 else
     # Activate virtual environment (POSIX + Windows venv handling)
