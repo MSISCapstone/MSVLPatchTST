@@ -65,8 +65,13 @@ def parse_args():
     parser.add_argument('--head_dropout', type=float, default=0.0, help='head dropout')
     
     # Patching
-    parser.add_argument('--patch_len', type=int, default=16, help='patch length')
-    parser.add_argument('--stride', type=int, default=8, help='stride')
+    parser.add_argument('--patch_len', type=int, default=16, help='patch length (used when patch_len_short/long not specified)')
+    parser.add_argument('--stride', type=int, default=8, help='stride (used when stride_short/long not specified)')
+    # Multi-scale patching for short and long channels
+    parser.add_argument('--patch_len_short', type=int, default=None, help='patch length for short channel (fast dynamics)')
+    parser.add_argument('--stride_short', type=int, default=None, help='stride for short channel')
+    parser.add_argument('--patch_len_long', type=int, default=None, help='patch length for long channel (slow dynamics)')
+    parser.add_argument('--stride_long', type=int, default=None, help='stride for long channel')
     parser.add_argument('--padding_patch', type=str, default='end', help='padding patch, options:[None, end]')
     parser.add_argument('--revin', type=int, default=1, help='RevIN; True 1 False 0')
     parser.add_argument('--affine', type=int, default=0, help='RevIN-affine; True 1 False 0')
@@ -155,6 +160,18 @@ def main():
     config.lradj = args.lradj
     config.use_amp = args.use_amp
     config.pct_start = args.pct_start
+    
+    # Update patch_configs with command line arguments for multi-scale patching
+    # Use channel-specific args if provided, otherwise fall back to default patch_len/stride
+    patch_len_short = args.patch_len_short if args.patch_len_short is not None else args.patch_len
+    stride_short = args.stride_short if args.stride_short is not None else args.stride
+    patch_len_long = args.patch_len_long if args.patch_len_long is not None else args.patch_len
+    stride_long = args.stride_long if args.stride_long is not None else args.stride
+    
+    config.patch_configs = {
+        'short_channel': {'patch_len': patch_len_short, 'stride': stride_short, 'weight': 0.5},
+        'long_channel': {'patch_len': patch_len_long, 'stride': stride_long, 'weight': 0.5}
+    }
     
     # Set seed
     set_seed(config.random_seed)
