@@ -161,7 +161,7 @@ def compute_test_data_statistics(root_path_name, data_path_name, data_columns, o
     return stats_df
 
 
-def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
+def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, patch_len_short=16, stride_short=8, patch_len_long=16, stride_long=8):
     """Save per-feature metrics and create prediction plots."""
     os.makedirs(out_dir, exist_ok=True)
 
@@ -278,8 +278,8 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         ax.set_ylabel('Value (normalized)')
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle(f'MSVLPatchTST Weather Predictions - {total_timesteps} Timesteps\n({num_samples} samples x {actual_pred_len} steps, seq_len={seq_len})', fontsize=14)
-    fig_file = Path(out_dir) / f'prediction_grid_sl{seq_len}_pl{actual_pred_len}.png'
+    fig.suptitle(f'MSVLPatchTST Weather Predictions - {total_timesteps} Timesteps\n({num_samples} samples x {actual_pred_len} steps, seq_len={seq_len}, short[p{patch_len_short}_s{stride_short}] long[p{patch_len_long}_s{stride_long}])', fontsize=14)
+    fig_file = Path(out_dir) / f'prediction_grid_sl{seq_len}_pl{actual_pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}.png'
     fig.savefig(fig_file, bbox_inches='tight', dpi=150)
     plt.close(fig)
     print(f"Saved prediction plot to {fig_file}")
@@ -345,6 +345,10 @@ def main():
     parser.add_argument('--seq_len', type=int, default=336)
     parser.add_argument('--label_len', type=int, default=48)
     parser.add_argument('--pred_len', type=int, default=96)
+    parser.add_argument('--patch_len_short', type=int, default=16, help='Short channel patch length')
+    parser.add_argument('--stride_short', type=int, default=8, help='Short channel stride')
+    parser.add_argument('--patch_len_long', type=int, default=16, help='Long channel patch length')
+    parser.add_argument('--stride_long', type=int, default=8, help='Long channel stride')
     parser.add_argument('--results_src', default=None, help='Path to folder containing pred.npy')
     parser.add_argument('--output_dir', default=None, help='Output directory for results')
     parser.add_argument('--data_root', default=None, help='Path to datasets root')
@@ -417,7 +421,8 @@ def main():
     compute_test_data_statistics(root_path_name, args.data_file, data_columns, out_dir)
 
     # Save metrics and plots
-    save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len)
+    save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len,
+                       args.patch_len_short, args.stride_short, args.patch_len_long, args.stride_long)
 
     print(f"\nAll outputs saved to: {out_dir}")
 

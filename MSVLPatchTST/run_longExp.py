@@ -60,8 +60,8 @@ def parse_args():
     parser.add_argument('--e_layers', type=int, default=3, help='num of encoder layers')
     parser.add_argument('--d_layers', type=int, default=1, help='num of decoder layers')
     parser.add_argument('--d_ff', type=int, default=256, help='dimension of fcn')
-    parser.add_argument('--dropout', type=float, default=0.2, help='dropout')
-    parser.add_argument('--fc_dropout', type=float, default=0.2, help='fully connected dropout')
+    parser.add_argument('--dropout', type=float, default=0.0, help='dropout')
+    parser.add_argument('--fc_dropout', type=float, default=0.0, help='fully connected dropout')
     parser.add_argument('--head_dropout', type=float, default=0.0, help='head dropout')
     
     # Patching
@@ -83,7 +83,7 @@ def parse_args():
     parser.add_argument('--patience', type=int, default=20, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
     parser.add_argument('--des', type=str, default='Exp', help='exp description')
-    parser.add_argument('--loss', type=str, default='mse', help='loss function')
+    parser.add_argument('--loss', type=str, default='huber', help='loss function (mse, mae, huber)')
     parser.add_argument('--lradj', type=str, default='type3', help='adjust learning rate')
     parser.add_argument('--pct_start', type=float, default=0.3, help='pct_start')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
@@ -256,8 +256,10 @@ def main():
         criterion = torch.nn.MSELoss()
     elif config.loss == 'mae':
         criterion = torch.nn.L1Loss()
+    elif config.loss == 'huber':
+        criterion = torch.nn.HuberLoss(delta=1.0)
     else:
-        criterion = torch.nn.MSELoss()
+        criterion = torch.nn.HuberLoss(delta=1.0)
     
     # Setup checkpoint directory
     if args.checkpoint_path:
