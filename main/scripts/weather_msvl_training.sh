@@ -38,29 +38,34 @@ echo "Long channel: patch_len=$patch_len_long, stride=$stride_long"
 # Set paths relative to GIT_REPO_ROOT
 GIT_REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Setup virtual environment
-if [ ! -d "$GIT_REPO_ROOT/.venv" ]; then
-    echo "Creating virtual environment at $GIT_REPO_ROOT/.venv"
-    python3 -m venv "$GIT_REPO_ROOT/.venv"
-fi
-
-# Activate virtual environment (POSIX and Windows venv compatibility)
-if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
-    echo "Activating virtualenv (bin/activate)"
-    source "$GIT_REPO_ROOT/.venv/bin/activate"
-elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
-    echo "Activating virtualenv (Scripts/activate)"
-    source "$GIT_REPO_ROOT/.venv/Scripts/activate"
+# Check if running in Google Colab (skip venv if so)
+if [ -n "$COLAB_RELEASE_TAG" ] || [ -d "/content" ]; then
+    echo "Running in Google Colab, skipping venv activation"
 else
-    echo "No activation script found in $GIT_REPO_ROOT/.venv; attempting to create venv with python3"
-    python3 -m venv "$GIT_REPO_ROOT/.venv"
+    # Setup virtual environment
+    if [ ! -d "$GIT_REPO_ROOT/.venv" ]; then
+        echo "Creating virtual environment at $GIT_REPO_ROOT/.venv"
+        python3 -m venv "$GIT_REPO_ROOT/.venv"
+    fi
+
+    # Activate virtual environment (POSIX and Windows venv compatibility)
     if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
+        echo "Activating virtualenv (bin/activate)"
         source "$GIT_REPO_ROOT/.venv/bin/activate"
     elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
+        echo "Activating virtualenv (Scripts/activate)"
         source "$GIT_REPO_ROOT/.venv/Scripts/activate"
     else
-        echo "Failed to create or locate activation script in $GIT_REPO_ROOT/.venv" >&2
-        exit 1
+        echo "No activation script found in $GIT_REPO_ROOT/.venv; attempting to create venv with python3"
+        python3 -m venv "$GIT_REPO_ROOT/.venv"
+        if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
+            source "$GIT_REPO_ROOT/.venv/bin/activate"
+        elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
+            source "$GIT_REPO_ROOT/.venv/Scripts/activate"
+        else
+            echo "Failed to create or locate activation script in $GIT_REPO_ROOT/.venv" >&2
+            exit 1
+        fi
     fi
 fi
 
@@ -88,7 +93,7 @@ fi
 # Exact same parameters as original
 seq_len=336
 model_name=MSVLPatchTST
-DROPOUT=0.2
+DROPOUT=0.0
 
 # Dataset configuration - using weather_with_hour.csv for MSVL
 root_path_name=$GIT_REPO_ROOT/datasets/weather/

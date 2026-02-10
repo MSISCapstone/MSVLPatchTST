@@ -41,18 +41,23 @@ echo "Long channel: patch_len=$patch_len_long, stride=$stride_long"
 # Set paths relative to GIT_REPO_ROOT
 GIT_REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Activate virtual environment (POSIX + Windows venv handling)
-if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
-    echo "Activating virtualenv (bin/activate)"
-    source "$GIT_REPO_ROOT/.venv/bin/activate"
-elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
-    echo "Activating virtualenv (Scripts/activate)"
-    sed -i 's/\r$//' "$GIT_REPO_ROOT/.venv/Scripts/activate" 2>/dev/null || true
-    source "$GIT_REPO_ROOT/.venv/Scripts/activate"
+# Check if running in Google Colab (skip venv if so)
+if [ -n "$COLAB_RELEASE_TAG" ] || [ -d "/content" ]; then
+    echo "Running in Google Colab, skipping venv activation"
 else
-    echo "No virtualenv activation found at $GIT_REPO_ROOT/.venv - creating one with python3..."
-    python3 -m venv "$GIT_REPO_ROOT/.venv"
-    source "$GIT_REPO_ROOT/.venv/bin/activate"
+    # Activate virtual environment (POSIX + Windows venv handling)
+    if [ -f "$GIT_REPO_ROOT/.venv/bin/activate" ]; then
+        echo "Activating virtualenv (bin/activate)"
+        source "$GIT_REPO_ROOT/.venv/bin/activate"
+    elif [ -f "$GIT_REPO_ROOT/.venv/Scripts/activate" ]; then
+        echo "Activating virtualenv (Scripts/activate)"
+        sed -i 's/\r$//' "$GIT_REPO_ROOT/.venv/Scripts/activate" 2>/dev/null || true
+        source "$GIT_REPO_ROOT/.venv/Scripts/activate"
+    else
+        echo "No virtualenv activation found at $GIT_REPO_ROOT/.venv - creating one with python3..."
+        python3 -m venv "$GIT_REPO_ROOT/.venv"
+        source "$GIT_REPO_ROOT/.venv/bin/activate"
+    fi
 fi
 
 # MSVLPatchTST experiment parameters (match training defaults)
