@@ -48,7 +48,8 @@ def evaluate_model(model, test_loader, device, args):
     Returns:
         Dictionary with predictions, ground truth, and inputs
     """
-    # Get target input indices from model (p=0, T=1, wv=11, max.wv=12, rain=14, raining=15)
+    # Get target input indices from model (dynamically from config)
+    # Current: long_channel=[p, T, wv], short_channel=[rain, max.wv, raining]
     target_input_indices = []
     for group_name in args.channel_groups.keys():
         target_input_indices.extend(model.group_info[group_name].get('target_indices', []))
@@ -134,7 +135,8 @@ def evaluate_model_sliding_window(model, dataset, device, args, num_iterations=1
     Returns:
         Dictionary with predictions, ground truth, and metrics
     """
-    # Get target input indices from model (p=0, T=1, wv=11, max.wv=12, rain=14, raining=15)
+    # Get target input indices from model (dynamically from config)
+    # Current: long_channel=[p, T, wv], short_channel=[rain, max.wv, raining]
     target_input_indices = []
     for group_name in args.channel_groups.keys():
         target_input_indices.extend(model.group_info[group_name].get('target_indices', []))

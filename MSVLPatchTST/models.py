@@ -597,13 +597,13 @@ class MSVLPatchTST(nn.Module):
         Purpose: Performs forward pass through the MSVL PatchTST model with group-specific encoding and cross-group attention.
         Input: x - [bs, seq_len, 22] tensor with 20 weather channels + 2 hour features
         Output: output - [bs, pred_len, 6] tensor with predictions for 6 target features
-                         [p, T, rain, wv, max.wv, raining]
+                         [p, T, wv, rain, max.wv, raining]
         """
         bs = x.shape[0]
         
         # Get target indices (the input feature indices we're predicting)
-        # long_channel targets: p=0, T=1, rain=14
-        # short_channel targets: wv=11, max.wv=12, raining=15
+        # long_channel targets: p=0, T=1, wv=11
+        # short_channel targets: rain=14, max.wv=12, raining=15
         target_input_indices = []
         for group_name in self.channel_groups.keys():
             target_input_indices.extend(self.group_info[group_name].get('target_indices', []))

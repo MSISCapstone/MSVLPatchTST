@@ -102,19 +102,19 @@ class MSVLConfig:
             'Tlog (degC)', 'hour_sin', 'hour_cos'  # OT excluded
         ]
         
-        # Long channel targets: p (mbar), T (degC), rain (mm)
+        # Long channel targets: p (mbar), T (degC), wv (m/s)
         # These have slower dynamics - use larger patch size
-        long_target_indices = [0, 1, 14]  # p=0, T=1, rain=14
-        long_target_names = ['p (mbar)', 'T (degC)', 'rain (mm)']
+        long_target_indices = [0, 1, 11]  # p=0, T=1, wv=11
+        long_target_names = ['p (mbar)', 'T (degC)', 'wv (m/s)']
         
-        # Short channel targets: wv (m/s), max. wv (m/s), raining (s)
+        # Short channel targets: rain (mm), max. wv (m/s), raining (s)
         # These have faster dynamics - use smaller patch size
-        short_target_indices = [11, 12, 15]  # wv=11, max.wv=12, raining=15
-        short_target_names = ['wv (m/s)', 'max. wv (m/s)', 'raining (s)']
+        short_target_indices = [14, 12, 15]  # rain=14, max.wv=12, raining=15
+        short_target_names = ['rain (mm)', 'max. wv (m/s)', 'raining (s)']
         
         # Output indices in the final c_out=6 tensor:
-        # [0, 1, 2] = long channel targets (p, T, rain)
-        # [3, 4, 5] = short channel targets (wv, max.wv, raining)
+        # [0, 1, 2] = long channel targets (p, T, wv)
+        # [3, 4, 5] = short channel targets (rain, max.wv, raining)
 
         return {
             'long_channel': {
@@ -123,7 +123,7 @@ class MSVLConfig:
                 'target_indices': long_target_indices,  # Which input indices to predict
                 'target_names': long_target_names,
                 'output_indices': [0, 1, 2],  # Position in final output tensor
-                'description': 'Long-scale channel for slow dynamics (p, T, rain)'
+                'description': 'Long-scale channel for slow dynamics (p, T, wv)'
             },
             'short_channel': {
                 'indices': list(range(22)),  # All 22 inputs as predictors
@@ -131,6 +131,6 @@ class MSVLConfig:
                 'target_indices': short_target_indices,  # Which input indices to predict
                 'target_names': short_target_names,
                 'output_indices': [3, 4, 5],  # Position in final output tensor
-                'description': 'Short-scale channel for fast dynamics (wv, max.wv, raining)'
+                'description': 'Short-scale channel for fast dynamics (rain, max.wv, raining)'
             }
         }
