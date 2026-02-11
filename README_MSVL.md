@@ -113,8 +113,10 @@ All generated artifacts are organized under `output/`:
 | Artifact | Location |
 |----------|----------|
 | Training logs | `output/MSVLPatchTST/logs/` |
-| Checkpoints | `output/MSVLPatchTST/checkpoints/weather_336_96/` |
-| Test results | `output/MSVLPatchTST/test_results/weather_336_96/` |
+| Checkpoints | `output/MSVLPatchTST/checkpoints/weather_336_96_sp{X}_ss{X}_lp{X}_ls{X}/` |
+| Test results | `output/MSVLPatchTST/test_results/weather_336_96_sp{X}_ss{X}_lp{X}_ls{X}/` |
+
+Where `sp`=short patch_len, `ss`=short stride, `lp`=long patch_len, `ls`=long stride.
 
 ### Original PatchTST Outputs
 
@@ -128,8 +130,22 @@ All generated artifacts are organized under `output/`:
 
 After running test scripts, you'll find:
 
+**MSVLPatchTST** (example with short 16/8, long 32/16):
 ```
-output/{MSVLPatchTST,Original}/test_results/weather_336_96/
+output/MSVLPatchTST/test_results/weather_336_96_sp16_ss8_lp32_ls16/
+├── pred_sl336_pl96_sp16_ss8_lp32_ls16.npy                   # Predictions array
+├── true_sl336_pl96_sp16_ss8_lp32_ls16.npy                   # Ground truth array
+├── predictions_sl336_pl96_sp16_ss8_lp32_ls16.csv            # Combined predictions CSV
+├── per_feature_metrics_sl336_pl96_sp16_ss8_lp32_ls16.csv    # MAE, MSE, RMSE, RSE per target feature
+├── test_data_statistics_sl336_pl96_sp16_ss8_lp32_ls16.csv   # Test data statistics
+├── prediction_grid_sl336_pl96_sp16_ss8_lp32_ls16.png        # 2x3 plot grid
+├── summary_sl336_pl96_sp16_ss8_lp32_ls16.txt                # Overall metrics summary
+└── results_sl336_pl96_sp16_ss8_lp32_ls16.txt                # Basic results from inference
+```
+
+**Original PatchTST**:
+```
+output/Original/test_results/weather_336_96/
 ├── pred.npy                              # Predictions array
 ├── true.npy                              # Ground truth array
 ├── predictions.csv                       # Combined predictions CSV
@@ -289,11 +305,13 @@ Output: [batch, pred_len=96, channels=6]
 
 ## Quick Start
 
+### Basic Usage (Default Configuration)
+
 ```bash
 # 1. Setup environment
 ./main/scripts/setup.sh
 
-# 2. Train both models
+# 2. Train both models (default config)
 ./main/scripts/weather_msvl_training.sh
 ./main/scripts/weather_original_training.sh
 
@@ -302,6 +320,56 @@ Output: [batch, pred_len=96, channels=6]
 ./main/scripts/weather_original_test.sh
 
 # 4. Check results
-cat output/MSVLPatchTST/test_results/weather_336_96/summary.txt
+cat output/MSVLPatchTST/test_results/weather_336_96_sp16_ss8_lp16_ls8/summary_sl336_pl96_sp16_ss8_lp16_ls8.txt
 cat output/Original/test_results/weather_336_96/summary.txt
+```
+
+### Using Pre-configured Patch/Stride Settings
+
+MSVLPatchTST supports multiple patch/stride configurations via config files in `main/scripts/patch_len_configs/`:
+
+```bash
+# Config: short 8/4, long 16/8 (fine short, medium long)
+./main/scripts/weather_msvl_training.sh main/scripts/patch_len_configs/ps_config_08-04-16-08.txt
+./main/scripts/weather_msvl_test.sh main/scripts/patch_len_configs/ps_config_08-04-16-08.txt
+
+# Config: short 16/8, long 8/4 (medium short, fine long)
+./main/scripts/weather_msvl_training.sh main/scripts/patch_len_configs/ps_config_16-08-08-04.txt
+./main/scripts/weather_msvl_test.sh main/scripts/patch_len_configs/ps_config_16-08-08-04.txt
+
+# Config: short 16/8, long 32/16 (medium short, coarse long)
+./main/scripts/weather_msvl_training.sh main/scripts/patch_len_configs/ps_config_16-08-32-16.txt
+./main/scripts/weather_msvl_test.sh main/scripts/patch_len_configs/ps_config_16-08-32-16.txt
+
+# Config: short 32/16, long 16/8 (coarse short, medium long)
+./main/scripts/weather_msvl_training.sh main/scripts/patch_len_configs/ps_config_32-16-16-08.txt
+./main/scripts/weather_msvl_test.sh main/scripts/patch_len_configs/ps_config_32-16-16-08.txt
+```
+
+### Using Custom Parameters
+
+You can also pass parameters directly:
+
+```bash
+# Format: <patch_len_short> <stride_short> <patch_len_long> <stride_long>
+./main/scripts/weather_msvl_training.sh 12 6 24 12
+./main/scripts/weather_msvl_test.sh 12 6 24 12
+```
+
+### Batch Experiments
+
+Run all configurations in sequence:
+
+```bash
+# Train all configurations
+for config in main/scripts/patch_len_configs/ps_config_*.txt; do
+    echo "Training with $config"
+    ./main/scripts/weather_msvl_training.sh "$config"
+done
+
+# Test all configurations
+for config in main/scripts/patch_len_configs/ps_config_*.txt; do
+    echo "Testing with $config"
+    ./main/scripts/weather_msvl_test.sh "$config"
+done
 ```

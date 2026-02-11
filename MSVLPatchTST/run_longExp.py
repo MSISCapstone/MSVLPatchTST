@@ -60,13 +60,18 @@ def parse_args():
     parser.add_argument('--e_layers', type=int, default=3, help='num of encoder layers')
     parser.add_argument('--d_layers', type=int, default=1, help='num of decoder layers')
     parser.add_argument('--d_ff', type=int, default=256, help='dimension of fcn')
-    parser.add_argument('--dropout', type=float, default=0.2, help='dropout')
-    parser.add_argument('--fc_dropout', type=float, default=0.2, help='fully connected dropout')
+    parser.add_argument('--dropout', type=float, default=0.0, help='dropout')
+    parser.add_argument('--fc_dropout', type=float, default=0.0, help='fully connected dropout')
     parser.add_argument('--head_dropout', type=float, default=0.0, help='head dropout')
     
     # Patching
-    parser.add_argument('--patch_len', type=int, default=16, help='patch length')
-    parser.add_argument('--stride', type=int, default=8, help='stride')
+    parser.add_argument('--patch_len', type=int, default=16, help='patch length (used when patch_len_short/long not specified)')
+    parser.add_argument('--stride', type=int, default=8, help='stride (used when stride_short/long not specified)')
+    # Multi-scale patching for short and long channels
+    parser.add_argument('--patch_len_short', type=int, default=None, help='patch length for short channel (fast dynamics)')
+    parser.add_argument('--stride_short', type=int, default=None, help='stride for short channel')
+    parser.add_argument('--patch_len_long', type=int, default=None, help='patch length for long channel (slow dynamics)')
+    parser.add_argument('--stride_long', type=int, default=None, help='stride for long channel')
     parser.add_argument('--padding_patch', type=str, default='end', help='padding patch, options:[None, end]')
     parser.add_argument('--revin', type=int, default=1, help='RevIN; True 1 False 0')
     parser.add_argument('--affine', type=int, default=0, help='RevIN-affine; True 1 False 0')
@@ -83,7 +88,7 @@ def parse_args():
     parser.add_argument('--patience', type=int, default=20, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
     parser.add_argument('--des', type=str, default='Exp', help='exp description')
-    parser.add_argument('--loss', type=str, default='mse', help='loss function')
+    parser.add_argument('--loss', type=str, default='huber', help='loss function (mse, mae, huber)')
     parser.add_argument('--lradj', type=str, default='type3', help='adjust learning rate')
     parser.add_argument('--pct_start', type=float, default=0.3, help='pct_start')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
@@ -155,6 +160,18 @@ def main():
     config.lradj = args.lradj
     config.use_amp = args.use_amp
     config.pct_start = args.pct_start
+    
+    # Update patch_configs with command line arguments for multi-scale patching
+    # Use channel-specific args if provided, otherwise fall back to default patch_len/stride
+    patch_len_short = args.patch_len_short if args.patch_len_short is not None else args.patch_len
+    stride_short = args.stride_short if args.stride_short is not None else args.stride
+    patch_len_long = args.patch_len_long if args.patch_len_long is not None else args.patch_len
+    stride_long = args.stride_long if args.stride_long is not None else args.stride
+    
+    config.patch_configs = {
+        'short_channel': {'patch_len': patch_len_short, 'stride': stride_short, 'weight': 0.5},
+        'long_channel': {'patch_len': patch_len_long, 'stride': stride_long, 'weight': 0.5}
+    }
     
     # Set seed
     set_seed(config.random_seed)
@@ -256,8 +273,10 @@ def main():
         criterion = torch.nn.MSELoss()
     elif config.loss == 'mae':
         criterion = torch.nn.L1Loss()
+    elif config.loss == 'huber':
+        criterion = torch.nn.HuberLoss(delta=1.0)
     else:
-        criterion = torch.nn.MSELoss()
+        criterion = torch.nn.HuberLoss(delta=1.0)
     
     # Setup checkpoint directory
     if args.checkpoint_path:
@@ -344,17 +363,25 @@ def main():
     # Create output directory structure: output/MSVLPatchTST/test_results/weather_336_96/
     results_dir = os.path.join(git_root, 'output', 'MSVLPatchTST', 'test_results', args.model_id)
     os.makedirs(results_dir, exist_ok=True)
-    results_file = os.path.join(results_dir, 'results.txt')
+    
+    # Build file suffix from patch/stride config
+    patch_len_short = config.patch_configs['short_channel']['patch_len']
+    stride_short = config.patch_configs['short_channel']['stride']
+    patch_len_long = config.patch_configs['long_channel']['patch_len']
+    stride_long = config.patch_configs['long_channel']['stride']
+    file_suffix = f'_sl{config.seq_len}_pl{config.pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}'
+    
+    results_file = os.path.join(results_dir, f'results{file_suffix}.txt')
     
     # Save pred.npy for plotting script
     try:
-        pred_file = os.path.join(results_dir, 'pred.npy')
+        pred_file = os.path.join(results_dir, f'pred{file_suffix}.npy')
         np.save(pred_file, results['preds'])
         print(f'Saved predictions to: {pred_file}')
         print(f'Predictions shape: {results["preds"].shape}')
         
         # Also save ground truth for plotting
-        true_file = os.path.join(results_dir, 'true.npy')
+        true_file = os.path.join(results_dir, f'true{file_suffix}.npy')
         np.save(true_file, results['trues'])
         print(f'Saved ground truth to: {true_file}')
         
@@ -378,7 +405,7 @@ def main():
                     })
         
         csv_df = pd.DataFrame(rows)
-        csv_file = os.path.join(results_dir, 'predictions.csv')
+        csv_file = os.path.join(results_dir, f'predictions{file_suffix}.csv')
         csv_df.to_csv(csv_file, index=False)
         print(f'Saved combined predictions CSV to: {csv_file}')
         print(f'CSV shape: {len(csv_df)} rows ({num_samples} samples x {pred_len_actual} steps x {num_features} features)')

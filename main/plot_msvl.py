@@ -27,7 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from MSVLPatchTST.data_provider.data_factory import data_provider
-from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE, MAPE, MSPE
+from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE, MAPE, MSPE, SMAPE, HuberLoss
 
 FEATURES_TO_PLOT = [
     'p (mbar)',
@@ -41,41 +41,48 @@ FEATURES_TO_PLOT = [
 PLOT_ORDER = FEATURES_TO_PLOT
 
 
-def find_pred_file(results_src, git_root, model_id_name, seq_len, pred_len):
+def find_pred_file(results_src, git_root, model_id_name, seq_len, pred_len, patch_len_short=16, stride_short=8, patch_len_long=16, stride_long=8):
     """Find the prediction file in the output folder or fallback locations."""
-    model_id = f"{model_id_name}_{seq_len}_{pred_len}"
-    filenames_to_check = ['pred.npy', f'{model_id}_pred.npy']
+    model_id = f"{model_id_name}_{seq_len}_{pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}"
+    file_suffix = f'_sl{seq_len}_pl{pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}'
+    
+    # Filenames to check (new naming first, then legacy)
+    filenames_to_check = [
+        f'pred{file_suffix}.npy',  # New naming with suffix
+        'pred.npy',  # Legacy fallback
+        f'{model_id}_pred.npy'  # Alternative legacy
+    ]
     
     # Helper to search a directory for pred files
     def search_dir(base_path):
         p = Path(base_path)
         if not p.exists():
-            return None, None
+            return None, None, None
         # Direct files in directory
         for filename in filenames_to_check:
             pred_file = p / filename
             if pred_file.exists():
-                return pred_file, p
+                return pred_file, p, filename
         # Check in model_id subdirectory
         subdir = p / model_id
         if subdir.exists():
             for filename in filenames_to_check:
                 pred_file = subdir / filename
                 if pred_file.exists():
-                    return pred_file, subdir
-        return None, None
+                    return pred_file, subdir, filename
+        return None, None, None
     
     # Primary location: output/MSVLPatchTST/test_results/model_id/
     primary_loc = Path(git_root) / 'output' / 'MSVLPatchTST' / 'test_results' / model_id
-    pred_file, found_dir = search_dir(primary_loc)
+    pred_file, found_dir, found_filename = search_dir(primary_loc)
     if pred_file:
-        return pred_file, found_dir
+        return pred_file, found_dir, file_suffix
     
     # If results_src is provided, search there
     if results_src:
-        pred_file, found_dir = search_dir(results_src)
+        pred_file, found_dir, found_filename = search_dir(results_src)
         if pred_file:
-            return pred_file, found_dir
+            return pred_file, found_dir, file_suffix
     
     # Build error message with expected location
     raise FileNotFoundError(
@@ -128,7 +135,7 @@ def compute_feature_columns(root_path_name, data_path_name, target='OT'):
     return cols + [target]
 
 
-def compute_test_data_statistics(root_path_name, data_path_name, data_columns, out_dir):
+def compute_test_data_statistics(root_path_name, data_path_name, data_columns, out_dir, file_suffix=''):
     """Compute and save test data statistics for TARGET features only."""
     path = Path(root_path_name) / data_path_name
     df = pd.read_csv(path)
@@ -156,12 +163,13 @@ def compute_test_data_statistics(root_path_name, data_path_name, data_columns, o
             })
     
     stats_df = pd.DataFrame(stats)
-    stats_df.to_csv(Path(out_dir) / 'test_data_statistics.csv', index=False)
-    print(f"Saved test data statistics (target features) to {out_dir}/test_data_statistics.csv")
+    filename = f'test_data_statistics{file_suffix}.csv'
+    stats_df.to_csv(Path(out_dir) / filename, index=False)
+    print(f"Saved test data statistics (target features) to {out_dir}/{filename}")
     return stats_df
 
 
-def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
+def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, patch_len_short=16, stride_short=8, patch_len_long=16, stride_long=8):
     """Save per-feature metrics and create prediction plots."""
     os.makedirs(out_dir, exist_ok=True)
 
@@ -189,32 +197,42 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
             continue
         p = preds_for_metrics[..., idx]
         t = trues_for_metrics[..., idx]
-        mae = MAE(p, t)
+        
+        # Calculate all metrics
         mse = MSE(p, t)
+        mae = MAE(p, t)
         rmse = RMSE(p, t)
         rse = RSE(p, t)
-        # MAPE and MSPE with protection against division by zero
+        huber = HuberLoss(p, t, delta=1.0)
+        
+        # Metrics with division by zero protection
         mask = np.abs(t) > 1e-8
         if mask.sum() > 0:
-            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100  # as percentage
-            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100  # as percentage
+            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100
+            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100
         else:
             mape = float('nan')
             mspe = float('nan')
+        smape = SMAPE(p, t)
+        
         metrics.append({
             'feature': feat_name,
             'index': idx,
-            'mae': float(mae),
             'mse': float(mse),
+            'mae': float(mae),
             'rmse': float(rmse),
             'rse': float(rse),
+            'mspe': float(mspe),
             'mape': float(mape),
-            'mspe': float(mspe)
+            'smape': float(smape),
+            'huber': float(huber)
         })
     
     metrics_df = pd.DataFrame(metrics)
-    metrics_df.to_csv(Path(out_dir) / 'per_feature_metrics.csv', index=False)
-    print(f"Saved per-feature metrics to {out_dir}/per_feature_metrics.csv")
+    file_suffix = f'_sl{seq_len}_pl{actual_pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}'
+    metrics_filename = f'per_feature_metrics{file_suffix}.csv'
+    metrics_df.to_csv(Path(out_dir) / metrics_filename, index=False)
+    print(f"Saved per-feature metrics to {out_dir}/{metrics_filename}")
 
     # Create 2x3 plot grid for selected features - CONTINUOUS TIME SERIES
     feature_indices = []
@@ -248,16 +266,9 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         x_axis = np.arange(total_timesteps)
         
         # Compute metrics
-        mae = MAE(p, t)
-        mse = MSE(p, t)
-        # MAPE and MSPE with protection against division by zero
-        mask = np.abs(t) > 1e-8
-        if mask.sum() > 0:
-            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100
-            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100
-        else:
-            mape = float('nan')
-            mspe = float('nan')
+        huber = HuberLoss(p, t, delta=1.0)
+        mse = np.mean((p - t) ** 2)
+        mae = np.mean(np.abs(p - t))
 
         # Plot continuous time series
         ax.plot(x_axis, continuous_true, label='Ground Truth', linewidth=1.5, color='blue', alpha=0.8)
@@ -267,20 +278,21 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         for i in range(1, num_samples):
             ax.axvline(x=i * actual_pred_len, color='gray', linestyle='--', alpha=0.3)
         
-        ax.set_title(f"{feat_name}\nMAE={mae:.4f}, MSE={mse:.4f}, MAPE={mape:.2f}%, MSPE={mspe:.2f}%")
+        ax.set_title(f"{feat_name}\nHuber={huber:.4f}, MSE={mse:.4f}, MAE={mae:.4f}")
         ax.legend(loc='upper right', fontsize=8)
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Value (normalized)')
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle(f'MSVLPatchTST Weather Predictions - {total_timesteps} Timesteps\n({num_samples} samples x {actual_pred_len} steps, seq_len={seq_len})', fontsize=14)
-    fig_file = Path(out_dir) / f'prediction_grid_sl{seq_len}_pl{actual_pred_len}.png'
+    fig.suptitle(f'MSVLPatchTST Weather Predictions - {total_timesteps} Timesteps\n({num_samples} samples x {actual_pred_len} steps, seq_len={seq_len}, short[p{patch_len_short}_s{stride_short}] long[p{patch_len_long}_s{stride_long}])', fontsize=14)
+    fig_file = Path(out_dir) / f'prediction_grid_sl{seq_len}_pl{actual_pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}.png'
     fig.savefig(fig_file, bbox_inches='tight', dpi=150)
     plt.close(fig)
     print(f"Saved prediction plot to {fig_file}")
 
     # Save summary text file
-    with open(Path(out_dir) / 'summary.txt', 'w') as fh:
+    summary_filename = f'summary{file_suffix}.txt'
+    with open(Path(out_dir) / summary_filename, 'w') as fh:
         fh.write('MSVLPatchTST Test Results Summary\n')
         fh.write('=' * 60 + '\n\n')
         fh.write(f'Sequence Length (lookback): {seq_len}\n')
@@ -299,10 +311,15 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         if target_indices:
             preds_target = preds_for_metrics[..., target_indices]
             trues_target = trues_for_metrics[..., target_indices]
-            overall_mae = MAE(preds_target, trues_target)
+            
+            # Calculate all metrics
             overall_mse = MSE(preds_target, trues_target)
+            overall_mae = MAE(preds_target, trues_target)
             overall_rmse = RMSE(preds_target, trues_target)
-            # Overall MAPE and MSPE with protection against division by zero
+            overall_rse = RSE(preds_target, trues_target)
+            overall_huber = HuberLoss(preds_target, trues_target, delta=1.0)
+            
+            # Metrics with division by zero protection
             mask = np.abs(trues_target) > 1e-8
             if mask.sum() > 0:
                 overall_mape = np.mean(np.abs((preds_target[mask] - trues_target[mask]) / trues_target[mask])) * 100
@@ -310,17 +327,23 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
             else:
                 overall_mape = float('nan')
                 overall_mspe = float('nan')
+            overall_smape = SMAPE(preds_target, trues_target)
         else:
-            overall_mae = overall_mse = overall_rmse = overall_mape = overall_mspe = float('nan')
+            overall_mse = overall_mae = overall_rmse = overall_rse = float('nan')
+            overall_huber = overall_mape = overall_mspe = overall_smape = float('nan')
+            
         fh.write(f'Overall Metrics (target features only):\n')
         fh.write('-' * 60 + '\n')
-        fh.write(f'MAE: {overall_mae:.6f}\n')
         fh.write(f'MSE: {overall_mse:.6f}\n')
+        fh.write(f'MAE: {overall_mae:.6f}\n')
         fh.write(f'RMSE: {overall_rmse:.6f}\n')
-        fh.write(f'MAPE: {overall_mape:.2f}%\n')
+        fh.write(f'RSE: {overall_rse:.6f}\n')
         fh.write(f'MSPE: {overall_mspe:.2f}%\n')
+        fh.write(f'MAPE: {overall_mape:.2f}%\n')
+        fh.write(f'SMAPE: {overall_smape:.2f}%\n')
+        fh.write(f'Huber Loss: {overall_huber:.6f}\n')
 
-    print(f"Saved summary to {out_dir}/summary.txt")
+    print(f"Saved summary to {out_dir}/{summary_filename}")
 
 
 def main():
@@ -329,6 +352,10 @@ def main():
     parser.add_argument('--seq_len', type=int, default=336)
     parser.add_argument('--label_len', type=int, default=48)
     parser.add_argument('--pred_len', type=int, default=96)
+    parser.add_argument('--patch_len_short', type=int, default=16, help='Short channel patch length')
+    parser.add_argument('--stride_short', type=int, default=8, help='Short channel stride')
+    parser.add_argument('--patch_len_long', type=int, default=16, help='Long channel patch length')
+    parser.add_argument('--stride_long', type=int, default=8, help='Long channel stride')
     parser.add_argument('--results_src', default=None, help='Path to folder containing pred.npy')
     parser.add_argument('--output_dir', default=None, help='Output directory for results')
     parser.add_argument('--data_root', default=None, help='Path to datasets root')
@@ -349,18 +376,26 @@ def main():
     if args.output_dir:
         out_dir = Path(args.output_dir)
     else:
-        out_dir = Path(git_root) / 'output' / 'MSVLPatchTST' / 'test_results' / f"{args.model_id_name}_{args.seq_len}_{args.pred_len}"
+        out_dir = Path(git_root) / 'output' / 'MSVLPatchTST' / 'test_results' / f"{args.model_id_name}_{args.seq_len}_{args.pred_len}_sp{args.patch_len_short}_ss{args.stride_short}_lp{args.patch_len_long}_ls{args.stride_long}"
     
     os.makedirs(out_dir, exist_ok=True)
+    
+    # Build file suffix for consistent naming
+    file_suffix = f'_sl{args.seq_len}_pl{args.pred_len}_sp{args.patch_len_short}_ss{args.stride_short}_lp{args.patch_len_long}_ls{args.stride_long}'
 
     # Find and load predictions
-    pred_file, found_dir = find_pred_file(args.results_src, git_root, args.model_id_name, args.seq_len, args.pred_len)
+    pred_file, found_dir, _ = find_pred_file(args.results_src, git_root, args.model_id_name, args.seq_len, args.pred_len,
+                                              args.patch_len_short, args.stride_short, args.patch_len_long, args.stride_long)
     print(f"Loading predictions from: {pred_file}")
     preds = np.load(pred_file)
     print(f"Predictions shape: {preds.shape}")
 
     # Load ground truth from saved file (saved alongside predictions)
-    true_file = found_dir / 'true.npy'
+    # Try new naming first, then legacy
+    true_file = found_dir / f'true{file_suffix}.npy'
+    if not true_file.exists():
+        true_file = found_dir / 'true.npy'  # Legacy fallback
+    
     if true_file.exists():
         print(f"Loading ground truth from: {true_file}")
         trues = np.load(true_file)
@@ -396,12 +431,13 @@ def main():
         if len(data_columns) > preds.shape[-1]:
             data_columns = data_columns[:preds.shape[-1]]
         print(f"Data columns ({len(data_columns)}): {data_columns[:5]}...")
-
+    
     # Save test data statistics
-    compute_test_data_statistics(root_path_name, args.data_file, data_columns, out_dir)
+    compute_test_data_statistics(root_path_name, args.data_file, data_columns, out_dir, file_suffix)
 
     # Save metrics and plots
-    save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len)
+    save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len,
+                       args.patch_len_short, args.stride_short, args.patch_len_long, args.stride_long)
 
     print(f"\nAll outputs saved to: {out_dir}")
 

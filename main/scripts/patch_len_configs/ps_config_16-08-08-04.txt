@@ -1,0 +1,1 @@
+--patch_len_short 16 --stride_short 8 --patch_len_long 8 --stride_long 4

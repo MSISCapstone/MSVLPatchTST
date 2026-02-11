@@ -90,7 +90,7 @@ class MSVLConfig:
         self.do_predict = False
         self.itr = 1
         self.des = 'MSVLExp'
-        self.loss = 'mse'
+        self.loss = 'huber'
 
     def _define_channel_groups(self):
         """Define long and short channel grouping with feature assignment"""

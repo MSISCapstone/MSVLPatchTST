@@ -27,7 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from PatchTST_supervised.data_provider.data_factory import data_provider
-from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE, MAPE, MSPE
+from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE, MAPE, MSPE, SMAPE, HuberLoss
 
 FEATURES_TO_PLOT = [
     'p (mbar)',
@@ -176,27 +176,35 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
             continue
         p = preds_for_metrics[..., idx]
         t = trues_for_metrics[..., idx]
-        mae = MAE(p, t)
+        
+        # Calculate all metrics
         mse = MSE(p, t)
+        mae = MAE(p, t)
         rmse = RMSE(p, t)
         rse = RSE(p, t)
-        # MAPE and MSPE with protection against division by zero
+        huber = HuberLoss(p, t, delta=1.0)
+        
+        # Metrics with division by zero protection
         mask = np.abs(t) > 1e-8
         if mask.sum() > 0:
-            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100  # as percentage
-            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100  # as percentage
+            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100
+            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100
         else:
             mape = float('nan')
             mspe = float('nan')
+        smape = SMAPE(p, t)
+        
         metrics.append({
             'feature': feat_name,
             'index': idx,
-            'mae': float(mae),
             'mse': float(mse),
+            'mae': float(mae),
             'rmse': float(rmse),
             'rse': float(rse),
+            'mspe': float(mspe),
             'mape': float(mape),
-            'mspe': float(mspe)
+            'smape': float(smape),
+            'huber': float(huber)
         })
     
     metrics_df = pd.DataFrame(metrics)
@@ -235,16 +243,9 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         x_axis = np.arange(total_timesteps)
         
         # Compute metrics
-        mae = MAE(p, t)
-        mse = MSE(p, t)
-        # MAPE and MSPE with protection against division by zero
-        mask = np.abs(t) > 1e-8
-        if mask.sum() > 0:
-            mape = np.mean(np.abs((p[mask] - t[mask]) / t[mask])) * 100
-            mspe = np.mean(np.square((p[mask] - t[mask]) / t[mask])) * 100
-        else:
-            mape = float('nan')
-            mspe = float('nan')
+        huber = HuberLoss(p, t, delta=1.0)
+        mse = np.mean((p - t) ** 2)
+        mae = np.mean(np.abs(p - t))
 
         # Plot continuous time series
         ax.plot(x_axis, continuous_true, label='Ground Truth', linewidth=1.5, color='blue', alpha=0.8)
@@ -254,7 +255,7 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         for i in range(1, num_samples):
             ax.axvline(x=i * actual_pred_len, color='gray', linestyle='--', alpha=0.3)
         
-        ax.set_title(f"{feat_name}\nMAE={mae:.4f}, MSE={mse:.4f}, MAPE={mape:.2f}%, MSPE={mspe:.2f}%")
+        ax.set_title(f"{feat_name}\nHuber={huber:.4f}, MSE={mse:.4f}, MAE={mae:.4f}")
         ax.legend(loc='upper right', fontsize=8)
         ax.set_xlabel('Timestep')
         ax.set_ylabel('Value (normalized)')
@@ -286,10 +287,15 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         if target_indices:
             preds_target = preds_for_metrics[..., target_indices]
             trues_target = trues_for_metrics[..., target_indices]
-            overall_mae = MAE(preds_target, trues_target)
+            
+            # Calculate all metrics
             overall_mse = MSE(preds_target, trues_target)
+            overall_mae = MAE(preds_target, trues_target)
             overall_rmse = RMSE(preds_target, trues_target)
-            # Overall MAPE and MSPE with protection against division by zero
+            overall_rse = RSE(preds_target, trues_target)
+            overall_huber = HuberLoss(preds_target, trues_target, delta=1.0)
+            
+            # Metrics with division by zero protection
             mask = np.abs(trues_target) > 1e-8
             if mask.sum() > 0:
                 overall_mape = np.mean(np.abs((preds_target[mask] - trues_target[mask]) / trues_target[mask])) * 100
@@ -297,15 +303,21 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
             else:
                 overall_mape = float('nan')
                 overall_mspe = float('nan')
+            overall_smape = SMAPE(preds_target, trues_target)
         else:
-            overall_mae = overall_mse = overall_rmse = overall_mape = overall_mspe = float('nan')
+            overall_mse = overall_mae = overall_rmse = overall_rse = float('nan')
+            overall_huber = overall_mape = overall_mspe = overall_smape = float('nan')
+            
         fh.write(f'Overall Metrics (target features only):\n')
         fh.write('-' * 60 + '\n')
-        fh.write(f'MAE: {overall_mae:.6f}\n')
         fh.write(f'MSE: {overall_mse:.6f}\n')
+        fh.write(f'MAE: {overall_mae:.6f}\n')
         fh.write(f'RMSE: {overall_rmse:.6f}\n')
-        fh.write(f'MAPE: {overall_mape:.2f}%\n')
+        fh.write(f'RSE: {overall_rse:.6f}\n')
         fh.write(f'MSPE: {overall_mspe:.2f}%\n')
+        fh.write(f'MAPE: {overall_mape:.2f}%\n')
+        fh.write(f'SMAPE: {overall_smape:.2f}%\n')
+        fh.write(f'Huber Loss: {overall_huber:.6f}\n')
 
     print(f"Saved summary to {out_dir}/summary.txt")
 
