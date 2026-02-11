@@ -93,7 +93,7 @@ fi
 # Exact same parameters as original
 seq_len=336
 model_name=MSVLPatchTST
-DROPOUT=0.0
+DROPOUT=0.2
 
 # Dataset configuration - using weather_with_hour.csv for MSVL
 root_path_name=$GIT_REPO_ROOT/datasets/weather/
