@@ -5,17 +5,67 @@ Scans:
 - output/Original/test_results/*/summary*.txt
 
 Extracts Overall MSE, MAE and Huber Loss and writes `output/summary_comparison.md`.
+
+Usage:
+    python compare_summaries.py [--msvl-dir PATH] [--orig-dir PATH] [--output-dir PATH]
 """
 import re
+import sys
+import csv
+import argparse
 from pathlib import Path
+
+import numpy as np
+import matplotlib.pyplot as plt
 
 # Repository root (two levels up from this script)
 ROOT = Path(__file__).resolve().parents[2]
-OUTPUT_DIR = ROOT / "output"
+
+def convert_windows_path(path_str):
+    """Convert Windows path to WSL path if running in WSL."""
+    if path_str is None:
+        return None
+    # Check if it looks like a Windows path (e.g., C:\Users\...)
+    win_match = re.match(r'^([A-Za-z]):[\\\/](.*)$', path_str)
+    if win_match:
+        drive = win_match.group(1).lower()
+        rest = win_match.group(2).replace('\\', '/')
+        return f'/mnt/{drive}/{rest}'
+    return path_str
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Compare MSVLPatchTST and Original test results')
+parser.add_argument('--msvl-dir', type=str, default=None,
+                    help='Path to MSVL test_results directory (default: output/MSVLPatchTST/test_results)')
+parser.add_argument('--orig-dir', type=str, default=None,
+                    help='Path to Original test_results directory (default: output/Original/test_results)')
+parser.add_argument('--output-dir', type=str, default=None,
+                    help='Path to output directory for summary and plots (default: output)')
+args = parser.parse_args()
+
+# Convert Windows paths to WSL paths if needed
+msvl_dir_path = convert_windows_path(args.msvl_dir)
+orig_dir_path = convert_windows_path(args.orig_dir)
+output_dir_path = convert_windows_path(args.output_dir)
+
+# Set directories based on args or defaults
+# Note: MSVL_TEST_DIR and ORIG_TEST_DIR default to repository's output folder, not the custom output dir
+OUTPUT_DIR = Path(output_dir_path) if output_dir_path else ROOT / "output"
+MSVL_TEST_DIR = Path(msvl_dir_path) if msvl_dir_path else ROOT / "output" / "MSVLPatchTST" / "test_results"
+ORIG_TEST_DIR = Path(orig_dir_path) if orig_dir_path else ROOT / "output" / "Original" / "test_results"
+
+# Add MSVLPatchTST to path to import config
+sys.path.insert(0, str(ROOT / "MSVLPatchTST"))
+from config import MSVLConfig
+
+# Get channel groups from config
+config = MSVLConfig()
+LONG_CHANNEL_FEATURES = config.channel_groups['long_channel']['target_names']  # ['p (mbar)', 'T (degC)', 'wv (m/s)']
+SHORT_CHANNEL_FEATURES = config.channel_groups['short_channel']['target_names']  # ['rain (mm)', 'max. wv (m/s)', 'raining (s)']
 
 PATTERNS = [
-    (OUTPUT_DIR / "MSVLPatchTST" / "test_results").glob("*/summary*.txt"),
-    (OUTPUT_DIR / "Original" / "test_results").glob("*/summary*.txt"),
+    MSVL_TEST_DIR.glob("*/summary*.txt"),
+    ORIG_TEST_DIR.glob("*/summary*.txt"),
 ]
 
 metrics = {}
@@ -50,7 +100,7 @@ for group in PATTERNS:
 
 # Find original name (if any) and order results with Original first
 ordered = []
-orig_dir = OUTPUT_DIR / "Original" / "test_results"
+orig_dir = ORIG_TEST_DIR
 if orig_dir.exists():
     for p in orig_dir.iterdir():
         if p.is_dir():
@@ -58,19 +108,14 @@ if orig_dir.exists():
                 ordered.append((p.name, metrics.pop(p.name)))
 
 # then the remaining MSVL groups (sorted)
-msvl_dir = OUTPUT_DIR / "MSVLPatchTST" / "test_results"
-if msvl_dir.exists():
-    for p in sorted(msvl_dir.iterdir()):
+if MSVL_TEST_DIR.exists():
+    for p in sorted(MSVL_TEST_DIR.iterdir()):
         if p.is_dir() and p.name in metrics:
             ordered.append((p.name, metrics.pop(p.name)))
 
 # any leftover
 for name in sorted(metrics.keys()):
     ordered.append((name, metrics[name]))
-
-import numpy as np
-import matplotlib.pyplot as plt
-from pathlib import Path
 
 # Helpers
 
@@ -80,7 +125,8 @@ def safe_fname(s):
 # Write overall markdown
 out = OUTPUT_DIR / "summary_comparison.md"
 plots_dir = OUTPUT_DIR / "plots"
-plots_dir.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+plots_dir.mkdir(parents=True, exist_ok=True)
 
 with out.open("w") as f:
     f.write("# Summary comparison: MSVLPatchTST vs Original\n\n")
@@ -97,16 +143,15 @@ with out.open("w") as f:
     f.write("## Per-feature comparisons and plots\n\n")
 
     # Load original per-feature mapping (pick first original experiment)
-    orig_dir = OUTPUT_DIR / "Original" / "test_results"
-    orig_mapping = {}
-    orig_metrics = {}
+    orig_dir = ORIG_TEST_DIR
+    orig_mapping = {}  # feature_name -> index in original numpy arrays
+    orig_metrics = {}  # feature_name -> metrics dict
     orig_pred = orig_true = None
     if orig_dir.exists():
         # pick first directory
         d = next(orig_dir.iterdir())
         per_feat = d / "per_feature_metrics.csv"
         if per_feat.exists():
-            import csv
             with per_feat.open() as pf:
                 rdr = csv.DictReader(pf)
                 for row in rdr:
@@ -121,9 +166,8 @@ with out.open("w") as f:
             orig_true = np.load(p_true, allow_pickle=True)
 
     # For each MSVL experiment, create plots comparing to original
-    msvl_dir = OUTPUT_DIR / "MSVLPatchTST" / "test_results"
-    if msvl_dir.exists():
-        for mdir in sorted(msvl_dir.iterdir()):
+    if MSVL_TEST_DIR.exists():
+        for mdir in sorted(MSVL_TEST_DIR.iterdir()):
             if not mdir.is_dir():
                 continue
             # Parse parameters from the directory name for header
@@ -143,10 +187,9 @@ with out.open("w") as f:
             header = param_str if param_str else mdir.name
             f.write(f"### {header}\n\n")
             # read MSVL per-feature metrics
-            m_metrics = {}
-            m_map = {}
+            m_metrics = {}  # feature_name -> metrics dict
+            m_map = {}  # feature_name -> index in MSVL numpy arrays
             per_feat_m = mdir / next((p.name for p in mdir.iterdir() if p.name.startswith('per_feature_metrics')), 'per_feature_metrics.csv')
-            import csv
             if per_feat_m.exists():
                 with per_feat_m.open() as pf:
                     rdr = csv.DictReader(pf)
@@ -179,32 +222,41 @@ with out.open("w") as f:
             m_pred_flat = flatten(m_pred)
             m_true_flat = flatten(m_true)
 
-            # for each feature present in m_map
-            f.write("| feature | original MSE | msvl MSE | original MAE | msvl MAE | original Huber | msvl Huber |\n")
-            f.write("|---|---:|---:|---:|---:|---:|---|\n")
+            # Write table header
+            f.write("| feature | channel | original MSE | msvl MSE | original MAE | msvl MAE | original Huber | msvl Huber |\n")
+            f.write("|---|---|---:|---:|---:|---:|---:|---:|\n")
 
-            # collect plot paths to render as 3x2 matrix below the table
-            plot_paths = []
+            # collect plot paths for Channel-1 and Channel-2 separately
+            ch1_plot_paths = []
+            ch2_plot_paths = []
 
-            for feat in m_map:
-                if feat not in orig_mapping:
-                    continue
-                col_orig = orig_mapping[feat]
-                col_m = m_map[feat]
+            # Order features: Channel-1 (long_channel) first, then Channel-2 (short_channel)
+            ordered_features = []
+            for feat in LONG_CHANNEL_FEATURES:
+                if feat in m_map and feat in orig_mapping:
+                    ordered_features.append((feat, 'Channel-1'))
+            for feat in SHORT_CHANNEL_FEATURES:
+                if feat in m_map and feat in orig_mapping:
+                    ordered_features.append((feat, 'Channel-2'))
+
+            for feat, channel in ordered_features:
+                # Get indices from CSV - these are exact array column positions
+                col_orig = orig_mapping[feat]  # Index in original numpy arrays
+                col_m = m_map[feat]  # Index in MSVL numpy arrays
+                
                 # ensure columns exist
                 if col_orig >= orig_pred_flat.shape[1] or col_m >= m_pred_flat.shape[1]:
                     continue
-                # compute plots
+                
+                # Get data using indices from CSV
                 t = np.arange(orig_pred_flat.shape[0])
                 y_true = orig_true_flat[:, col_orig]
                 y_orig = orig_pred_flat[:, col_orig]
                 y_m = m_pred_flat[:, col_m]
 
-                # Prepare metric text (use per-feature metrics if available)
+                # Prepare metric text (use per-feature metrics from CSV)
                 om = orig_metrics.get(feat, {'mse': None, 'mae': None, 'huber': None})
                 mm = m_metrics.get(feat, {'mse': None, 'mae': None, 'huber': None})
-                om_str = f"Orig MSE={om['mse']:.6f}, MAE={om['mae']:.6f}, Huber={om['huber']:.6f}" if om['mse'] is not None else ''
-                mm_str = f"MSVL MSE={mm['mse']:.6f}, MAE={mm['mae']:.6f}, Huber={mm['huber']:.6f}" if mm['mse'] is not None else ''
 
                 # Parse parameters from the directory name for titles
                 seq_pred = re.search(r'_(\d+)_(\d+)', mdir.name)
@@ -223,27 +275,19 @@ with out.open("w") as f:
                 base_clean = re.sub(r'[^A-Za-z0-9_.-]', '-', base)
                 feature_label = f"{base_clean}-{unit}" if unit else base_clean
 
-                # Channel-1 text
-                ch1_txt = f"Channel-1 ({lp.group(1)}, {ls.group(1)})" if lp and ls else ''
-                ch2_txt = f"Channel-2 ({sp.group(1)}, {ss.group(1)})" if sp and ss else ''
+                # Channel text based on actual channel assignment from config
+                if channel == 'Channel-1':
+                    ch_txt = f"Channel-1 ({lp.group(1)}, {ls.group(1)})" if lp and ls else 'Channel-1'
+                else:
+                    ch_txt = f"Channel-2 ({sp.group(1)}, {ss.group(1)})" if sp and ss else 'Channel-2'
 
-                # Prepare metric lines (Original on second line, MSVL on third line)
+                # Prepare metric lines for title
                 om_m = om['mse'] if om['mse'] is not None else None
                 mm_m = mm['mse'] if mm['mse'] is not None else None
                 om_line = f"Original MSE={om['mse']:.6f}, MAE={om['mae']:.6f}, Huber={om['huber']:.6f}" if om_m is not None else "Original: N/A"
                 mm_line = f"MSVL MSE={mm['mse']:.6f}, MAE={mm['mae']:.6f}, Huber={mm['huber']:.6f}" if mm_m is not None else "MSVL: N/A"
 
-                # Build three-line title per request:
-                # Row 1 (plots 0-2): show Channel-1
-                # Row 2 (plots 3-5): show Channel-2
-                # Line 1: feature_label, Pred-Len, Channel (based on row)
-                # Line 1: feature, Pred-Len, Channel
-                # Line 2: Original metrics
-                # Line 3: MSVL metrics
-                plot_idx = len(plot_paths)
-                is_first_row = plot_idx < 3
-                ch_txt = ch1_txt if is_first_row else ch2_txt
-
+                # Build title
                 top_parts = [feature_label]
                 if pred_a and pred_b:
                     top_parts.append(f"Pred-Len ({pred_a}, {pred_b})")
@@ -270,8 +314,13 @@ with out.open("w") as f:
                 plt.close()
 
                 # save relative path for the image grid
-                plot_paths.append(str(plot_name.relative_to(OUTPUT_DIR).as_posix()))
+                plot_rel_path = str(plot_name.relative_to(OUTPUT_DIR).as_posix())
+                if channel == 'Channel-1':
+                    ch1_plot_paths.append(plot_rel_path)
+                else:
+                    ch2_plot_paths.append(plot_rel_path)
 
+                # Write table row
                 om_mse = f"{om['mse']:.6f}" if om['mse'] is not None else 'N/A'
                 mm_mse = f"{mm['mse']:.6f}" if mm['mse'] is not None else 'N/A'
                 om_mae = f"{om['mae']:.6f}" if om['mae'] is not None else 'N/A'
@@ -279,24 +328,31 @@ with out.open("w") as f:
                 om_h = f"{om['huber']:.6f}" if om['huber'] is not None else 'N/A'
                 mm_h = f"{mm['huber']:.6f}" if mm['huber'] is not None else 'N/A'
 
-                f.write(f"| {feat} | {om_mse} | {mm_mse} | {om_mae} | {mm_mae} | {om_h} | {mm_h} |\n")
+                f.write(f"| {feat} | {channel} | {om_mse} | {mm_mse} | {om_mae} | {mm_mae} | {om_h} | {mm_h} |\n")
 
-            # Render plots as a 3x2 matrix below the table
+            # Render plots as a 3x2 matrix: Channel-1 row 1, Channel-2 row 2
             f.write("\n**Plots**\n\n")
-            f.write("| | | |\n")
+            f.write("| Channel-1: Long Channel (p, T, wv) | | |\n")
             f.write("|---|---|---|\n")
-            for i in range(0, len(plot_paths), 3):
-                row = plot_paths[i:i+3]
-                # pad row to 3
-                while len(row) < 3:
-                    row.append(None)
-                f.write("|")
-                for p in row:
-                    if p:
-                        f.write(f" <img src=\"{p}\" width=\"320\"> |")
-                    else:
-                        f.write("  |")
-                f.write("\n")
+            # Row 1: Channel-1 plots
+            f.write("|")
+            for i in range(3):
+                if i < len(ch1_plot_paths):
+                    f.write(f" <img src=\"{ch1_plot_paths[i]}\" width=\"320\"> |")
+                else:
+                    f.write("  |")
+            f.write("\n\n")
+            
+            f.write("| Channel-2: Short Channel (rain, max.wv, raining) | | |\n")
+            f.write("|---|---|---|\n")
+            # Row 2: Channel-2 plots
+            f.write("|")
+            for i in range(3):
+                if i < len(ch2_plot_paths):
+                    f.write(f" <img src=\"{ch2_plot_paths[i]}\" width=\"320\"> |")
+                else:
+                    f.write("  |")
+            f.write("\n")
 
             f.write('\n')
 
