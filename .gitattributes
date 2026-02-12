@@ -1,4 +1,2 @@
 * text=auto
 *.sh text eol=lf
-datasets/electricity/electricity.csv filter=lfs diff=lfs merge=lfs -text
-datasets/traffic/traffic.csv filter=lfs diff=lfs merge=lfs -text
