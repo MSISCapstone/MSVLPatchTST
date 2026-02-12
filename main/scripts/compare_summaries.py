@@ -16,10 +16,48 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 # Repository root (two levels up from this script)
 ROOT = Path(__file__).resolve().parents[2]
+
+# Dataset paths
+DATASETS_DIR = ROOT / "datasets" / "weather"
+ORIG_DATA_FILE = "weather.csv"
+MSVL_DATA_FILE = "weather_with_hour.csv"
+
+
+def compute_scaler_params(data_file, target='OT'):
+    """
+    Compute mean and std for each feature from training data (first 70%).
+    Returns dict: feature_name -> (mean, std)
+    """
+    df = pd.read_csv(data_file)
+    
+    # Get columns (same logic as Dataset_Custom)
+    cols = list(df.columns)
+    cols.remove(target)
+    cols.remove('date')
+    df = df[['date'] + cols + [target]]
+    
+    # Training split (first 70%)
+    num_train = int(len(df) * 0.7)
+    train_df = df.iloc[:num_train]
+    
+    # Compute stats for each feature column
+    scaler_params = {}
+    for col in df.columns:
+        if col == 'date':
+            continue
+        scaler_params[col] = (train_df[col].mean(), train_df[col].std())
+    
+    return scaler_params
+
+
+def denormalize(values, mean, std):
+    """Inverse transform: original = normalized * std + mean"""
+    return values * std + mean
 
 def convert_windows_path(path_str):
     """Convert Windows path to WSL path if running in WSL."""
@@ -142,28 +180,58 @@ with out.open("w") as f:
     f.write("\n---\n\n")
     f.write("## Per-feature comparisons and plots\n\n")
 
-    # Load original per-feature mapping (pick first original experiment)
+    # Load original per-feature data (pick first original experiment)
+    # Build dictionaries: feature_name -> data arrays (instead of indices)
     orig_dir = ORIG_TEST_DIR
-    orig_mapping = {}  # feature_name -> index in original numpy arrays
     orig_metrics = {}  # feature_name -> metrics dict
-    orig_pred = orig_true = None
+    orig_pred_by_feat = {}  # feature_name -> flattened prediction array
+    orig_true_by_feat = {}  # feature_name -> flattened ground truth array
+    
+    # Compute scaler params for Original (uses weather.csv)
+    orig_scaler_params = compute_scaler_params(DATASETS_DIR / ORIG_DATA_FILE)
+    
     if orig_dir.exists():
         # pick first directory
         d = next(orig_dir.iterdir())
         per_feat = d / "per_feature_metrics.csv"
+        
+        # Load predictions and truths first
+        p_pred = d / 'pred.npy'
+        p_true = d / 'true.npy'
+        orig_pred = np.load(p_pred, allow_pickle=True) if p_pred.exists() else None
+        orig_true = np.load(p_true, allow_pickle=True) if p_true.exists() else None
+        
+        # Flatten arrays
+        def flatten(arr):
+            if arr is None:
+                return None
+            if arr.ndim == 3:
+                return arr.reshape(-1, arr.shape[-1])
+            elif arr.ndim == 2:
+                return arr
+            return arr
+        
+        orig_pred_flat = flatten(orig_pred)
+        orig_true_flat = flatten(orig_true)
+        
+        # Map feature names to columns using CSV indices and denormalize
         if per_feat.exists():
             with per_feat.open() as pf:
                 rdr = csv.DictReader(pf)
                 for row in rdr:
                     name_feat = row['feature']
-                    orig_mapping[name_feat] = int(row['index'])
+                    col_idx = int(row['index'])
                     orig_metrics[name_feat] = { 'mse': float(row['mse']), 'mae': float(row['mae']), 'huber': float(row['huber']) }
-        p_pred = d / 'pred.npy'
-        p_true = d / 'true.npy'
-        if p_pred.exists():
-            orig_pred = np.load(p_pred, allow_pickle=True)
-        if p_true.exists():
-            orig_true = np.load(p_true, allow_pickle=True)
+                    # Get scaler params for this feature
+                    if name_feat in orig_scaler_params:
+                        mean, std = orig_scaler_params[name_feat]
+                    else:
+                        mean, std = 0.0, 1.0  # fallback: no denormalization
+                    # Store denormalized data arrays by feature name
+                    if orig_pred_flat is not None and col_idx < orig_pred_flat.shape[1]:
+                        orig_pred_by_feat[name_feat] = denormalize(orig_pred_flat[:, col_idx], mean, std)
+                    if orig_true_flat is not None and col_idx < orig_true_flat.shape[1]:
+                        orig_true_by_feat[name_feat] = denormalize(orig_true_flat[:, col_idx], mean, std)
 
     # For each MSVL experiment, create plots comparing to original
     if MSVL_TEST_DIR.exists():
@@ -186,41 +254,56 @@ with out.open("w") as f:
             param_str = ', '.join(param_parts)
             header = param_str if param_str else mdir.name
             f.write(f"### {header}\n\n")
-            # read MSVL per-feature metrics
+            # read MSVL per-feature metrics and build feature-keyed data dictionaries
             m_metrics = {}  # feature_name -> metrics dict
-            m_map = {}  # feature_name -> index in MSVL numpy arrays
+            m_pred_by_feat = {}  # feature_name -> flattened prediction array
+            m_true_by_feat = {}  # feature_name -> flattened ground truth array
+            
+            # Compute scaler params for MSVL (uses weather_with_hour.csv)
+            msvl_scaler_params = compute_scaler_params(DATASETS_DIR / MSVL_DATA_FILE)
+            
             per_feat_m = mdir / next((p.name for p in mdir.iterdir() if p.name.startswith('per_feature_metrics')), 'per_feature_metrics.csv')
+            
+            # load predictions and truths first
+            p_pred = next((p for p in mdir.iterdir() if p.name.startswith('pred') and p.suffix == '.npy'), None)
+            p_true = next((p for p in mdir.iterdir() if p.name.startswith('true') and p.suffix == '.npy'), None)
+            
+            if p_pred is None or p_true is None or not orig_pred_by_feat:
+                f.write("Missing prediction/true files for plotting.\n\n")
+                continue
+                
+            m_pred = np.load(p_pred, allow_pickle=True)
+            m_true = np.load(p_true, allow_pickle=True)
+
+            # Flatten arrays
+            def flatten_arr(arr):
+                if arr.ndim == 3:
+                    return arr.reshape(-1, arr.shape[-1])
+                elif arr.ndim == 2:
+                    return arr
+                return arr
+
+            m_pred_flat = flatten_arr(m_pred)
+            m_true_flat = flatten_arr(m_true)
+            
+            # Map feature names to columns using CSV indices and denormalize
             if per_feat_m.exists():
                 with per_feat_m.open() as pf:
                     rdr = csv.DictReader(pf)
                     for row in rdr:
                         name_feat = row['feature']
-                        m_map[name_feat] = int(row['index'])
+                        col_idx = int(row['index'])
                         m_metrics[name_feat] = { 'mse': float(row['mse']), 'mae': float(row['mae']), 'huber': float(row['huber']) }
-
-            # load predictions and truths
-            # find pred file that starts with pred
-            p_pred = next((p for p in mdir.iterdir() if p.name.startswith('pred') and p.suffix == '.npy'), None)
-            p_true = next((p for p in mdir.iterdir() if p.name.startswith('true') and p.suffix == '.npy'), None)
-            if p_pred is None or p_true is None or orig_pred is None or orig_true is None:
-                f.write("Missing prediction/true files for plotting.\n\n")
-                continue
-            m_pred = np.load(p_pred, allow_pickle=True)
-            m_true = np.load(p_true, allow_pickle=True)
-
-            # reshape to (total_timesteps, n_features)
-            def flatten(arr):
-                if arr.ndim == 3:
-                    return arr.reshape(-1, arr.shape[-1])
-                elif arr.ndim == 2:
-                    return arr
-                else:
-                    return arr
-
-            orig_pred_flat = flatten(orig_pred)
-            orig_true_flat = flatten(orig_true)
-            m_pred_flat = flatten(m_pred)
-            m_true_flat = flatten(m_true)
+                        # Get scaler params for this feature
+                        if name_feat in msvl_scaler_params:
+                            mean, std = msvl_scaler_params[name_feat]
+                        else:
+                            mean, std = 0.0, 1.0  # fallback: no denormalization
+                        # Store denormalized data arrays by feature name
+                        if col_idx < m_pred_flat.shape[1]:
+                            m_pred_by_feat[name_feat] = denormalize(m_pred_flat[:, col_idx], mean, std)
+                        if col_idx < m_true_flat.shape[1]:
+                            m_true_by_feat[name_feat] = denormalize(m_true_flat[:, col_idx], mean, std)
 
             # Write table header
             f.write("| feature | channel | original MSE | msvl MSE | original MAE | msvl MAE | original Huber | msvl Huber |\n")
@@ -233,26 +316,18 @@ with out.open("w") as f:
             # Order features: Channel-1 (long_channel) first, then Channel-2 (short_channel)
             ordered_features = []
             for feat in LONG_CHANNEL_FEATURES:
-                if feat in m_map and feat in orig_mapping:
+                if feat in m_pred_by_feat and feat in orig_pred_by_feat:
                     ordered_features.append((feat, 'Channel-1'))
             for feat in SHORT_CHANNEL_FEATURES:
-                if feat in m_map and feat in orig_mapping:
+                if feat in m_pred_by_feat and feat in orig_pred_by_feat:
                     ordered_features.append((feat, 'Channel-2'))
 
             for feat, channel in ordered_features:
-                # Get indices from CSV - these are exact array column positions
-                col_orig = orig_mapping[feat]  # Index in original numpy arrays
-                col_m = m_map[feat]  # Index in MSVL numpy arrays
-                
-                # ensure columns exist
-                if col_orig >= orig_pred_flat.shape[1] or col_m >= m_pred_flat.shape[1]:
-                    continue
-                
-                # Get data using indices from CSV
-                t = np.arange(orig_pred_flat.shape[0])
-                y_true = orig_true_flat[:, col_orig]
-                y_orig = orig_pred_flat[:, col_orig]
-                y_m = m_pred_flat[:, col_m]
+                # Get data directly by feature name (no index lookups)
+                y_true = orig_true_by_feat[feat]
+                y_orig = orig_pred_by_feat[feat]
+                y_m = m_pred_by_feat[feat]
+                t = np.arange(len(y_true))
 
                 # Prepare metric text (use per-feature metrics from CSV)
                 om = orig_metrics.get(feat, {'mse': None, 'mae': None, 'huber': None})
@@ -331,8 +406,12 @@ with out.open("w") as f:
                 f.write(f"| {feat} | {channel} | {om_mse} | {mm_mse} | {om_mae} | {mm_mae} | {om_h} | {mm_h} |\n")
 
             # Render plots as a 3x2 matrix: Channel-1 row 1, Channel-2 row 2
+            # Get channel titles from config
+            long_features_str = ', '.join(LONG_CHANNEL_FEATURES)
+            short_features_str = ', '.join(SHORT_CHANNEL_FEATURES)
+            
             f.write("\n**Plots**\n\n")
-            f.write("| Channel-1: Long Channel (p, T, wv) | | |\n")
+            f.write(f"| Channel-1 ({long_features_str}) | | |\n")
             f.write("|---|---|---|\n")
             # Row 1: Channel-1 plots
             f.write("|")
@@ -343,7 +422,7 @@ with out.open("w") as f:
                     f.write("  |")
             f.write("\n\n")
             
-            f.write("| Channel-2: Short Channel (rain, max.wv, raining) | | |\n")
+            f.write(f"| Channel-2 ({short_features_str}) | | |\n")
             f.write("|---|---|---|\n")
             # Row 2: Channel-2 plots
             f.write("|")

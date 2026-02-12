@@ -22,18 +22,23 @@ if [ -f "$1" ]; then
     stride_short=$(echo "$PATCH_STRIDE_PARAMS" | grep -oP '(?<=--stride_short )\d+')
     patch_len_long=$(echo "$PATCH_STRIDE_PARAMS" | grep -oP '(?<=--patch_len_long )\d+')
     stride_long=$(echo "$PATCH_STRIDE_PARAMS" | grep -oP '(?<=--stride_long )\d+')
+    # Extract optional weights (may not be present in older configs)
+    weight_short=$(echo "$PATCH_STRIDE_PARAMS" | grep -oP '(?<=--weight_short )[0-9.]+' || echo "1.5")
+    weight_long=$(echo "$PATCH_STRIDE_PARAMS" | grep -oP '(?<=--weight_long )[0-9.]+' || echo "0.5")
 else
     # Individual parameters provided
     patch_len_short=${1:-16}
     stride_short=${2:-8}
     patch_len_long=${3:-16}
     stride_long=${4:-8}
-    PATCH_STRIDE_PARAMS="--patch_len_short $patch_len_short --stride_short $stride_short --patch_len_long $patch_len_long --stride_long $stride_long"
+    weight_short=${5:-1.5}
+    weight_long=${6:-0.5}
+    PATCH_STRIDE_PARAMS="--patch_len_short $patch_len_short --stride_short $stride_short --patch_len_long $patch_len_long --stride_long $stride_long --weight_short $weight_short --weight_long $weight_long"
     echo "Using individual parameters:"
 fi
 
-echo "Short channel: patch_len=$patch_len_short, stride=$stride_short"
-echo "Long channel: patch_len=$patch_len_long, stride=$stride_long"
+echo "Short channel: patch_len=$patch_len_short, stride=$stride_short, weight=$weight_short"
+echo "Long channel: patch_len=$patch_len_long, stride=$stride_long, weight=$weight_long"
 
 # Set paths relative to GIT_REPO_ROOT
 GIT_REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -104,7 +109,7 @@ data_name=custom
 random_seed=2021
 
 echo "Running MSVLPatchTST (Multi-Scale Variable-Length PatchTST)"
-echo "Parameters: short[p${patch_len_short}_s${stride_short}] long[p${patch_len_long}_s${stride_long}]"
+echo "Parameters: short[p${patch_len_short}_s${stride_short}_w${weight_short}] long[p${patch_len_long}_s${stride_long}_w${weight_long}]"
 echo "================================================================"
 
 for pred_len in 96
@@ -114,8 +119,8 @@ do
     echo "========================================" | tee "$log_file"
     echo "MSVLPatchTST" | tee -a "$log_file"
     echo "seq_len=${seq_len}, pred_len=${pred_len}" | tee -a "$log_file"
-    echo "Short channel: patch_len=${patch_len_short}, stride=${stride_short}" | tee -a "$log_file"
-    echo "Long channel: patch_len=${patch_len_long}, stride=${stride_long}" | tee -a "$log_file"
+    echo "Short channel: patch_len=${patch_len_short}, stride=${stride_short}, weight=${weight_short}" | tee -a "$log_file"
+    echo "Long channel: patch_len=${patch_len_long}, stride=${stride_long}, weight=${weight_long}" | tee -a "$log_file"
     echo "========================================" | tee -a "$log_file"
     
     # Run MSVLPatchTST with exact same parameters as original

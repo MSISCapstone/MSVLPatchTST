@@ -1,1 +1,1 @@
---patch_len_short 8 --stride_short 4 --patch_len_long 16 --stride_long 8
+--patch_len_short 8 --stride_short 4 --patch_len_long 16 --stride_long 8 --weight_short 1.5 --weight_long 0.5

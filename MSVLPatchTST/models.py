@@ -397,7 +397,7 @@ class CrossGroupAttention(nn.Module):
     - Pressure gradients -> Wind
     - Temperature -> Convection -> Rain
     """
-    def __init__(self, n_channels, d_model, n_heads, dropout):
+    def __init__(self, n_channels, d_model, n_heads, dropout, ffn_ratio=2):
         """
         CrossGroupAttention.__init__
         Purpose: Initializes cross-group attention module for fusing long and short channel predictions.
@@ -406,6 +406,7 @@ class CrossGroupAttention(nn.Module):
             d_model (int): Model dimension
             n_heads (int): Number of attention heads
             dropout (float): Dropout probability
+            ffn_ratio (int): FFN expansion ratio (default 2, reduced from 4)
         Output: None
         """
         super().__init__()
@@ -424,12 +425,12 @@ class CrossGroupAttention(nn.Module):
             dropout=dropout
         )
         
-        # Feed-forward network for refinement (2 layers)
+        # Feed-forward network for refinement (reduced depth: ratio=2 instead of 4)
         self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_model * 4),
+            nn.Linear(d_model, d_model * ffn_ratio),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_model * 4, d_model),
+            nn.Linear(d_model * ffn_ratio, d_model),
             nn.Dropout(dropout)
         )
         self.norm_ffn = nn.LayerNorm(d_model)
@@ -586,7 +587,8 @@ class MSVLPatchTST(nn.Module):
                 n_channels=self.c_out,  # Dynamic
                 d_model=configs.d_model // 2,
                 n_heads=configs.n_heads // 4,
-                dropout=configs.dropout
+                dropout=configs.dropout,
+                ffn_ratio=getattr(configs, 'cross_group_ffn_ratio', 2)  # Reduced FFN depth
             )
             # Learnable mixing weight
             self.cross_group_weight = nn.Parameter(torch.tensor(0.3))
@@ -631,11 +633,21 @@ class MSVLPatchTST(nn.Module):
             group_x = x[:, info['all_indices'], :]
             
             # Encode - returns predictions for this group's targets
+            # NOTE: Encoder outputs in SORTED input index order (iterates 0→21)
             group_out = encoder(group_x, info['output_mask'])
             
-            # Place outputs in correct positions (direct assignment, no weighting needed)
+            # Map encoder outputs (sorted order) to intended target_indices order
+            # Encoder outputs channels in sorted(target_indices) order
+            # But we want them in target_indices order for output_indices assignment
+            target_indices = info['target_indices']
+            sorted_target = sorted(target_indices)
+            
             for i, ch_idx in enumerate(info['output_indices']):
-                all_outputs[:, ch_idx, :] = group_out[:, i, :]
+                # target_indices[i] = which input feature this output position represents
+                # Find where the encoder placed it (encoder sorts by input index)
+                target_input_idx = target_indices[i]
+                encoder_pos = sorted_target.index(target_input_idx)
+                all_outputs[:, ch_idx, :] = group_out[:, encoder_pos, :]
         
         # Permute to [bs, pred_len, c_out]
         output = all_outputs.permute(0, 2, 1)

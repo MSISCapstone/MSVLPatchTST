@@ -72,6 +72,11 @@ def parse_args():
     parser.add_argument('--stride_short', type=int, default=None, help='stride for short channel')
     parser.add_argument('--patch_len_long', type=int, default=None, help='patch length for long channel (slow dynamics)')
     parser.add_argument('--stride_long', type=int, default=None, help='stride for long channel')
+    # Loss weights per channel group (higher weight = more focus during training)
+    parser.add_argument('--weight_short', type=float, default=1.5, help='loss weight for short channel (sparse features)')
+    parser.add_argument('--weight_long', type=float, default=0.5, help='loss weight for long channel')
+    # Cross-group attention configuration
+    parser.add_argument('--cross_group_ffn_ratio', type=int, default=2, help='FFN expansion ratio for cross-group attention (default: 2)')
     parser.add_argument('--padding_patch', type=str, default='end', help='padding patch, options:[None, end]')
     parser.add_argument('--revin', type=int, default=1, help='RevIN; True 1 False 0')
     parser.add_argument('--affine', type=int, default=0, help='RevIN-affine; True 1 False 0')
@@ -169,9 +174,12 @@ def main():
     stride_long = args.stride_long if args.stride_long is not None else args.stride
     
     config.patch_configs = {
-        'short_channel': {'patch_len': patch_len_short, 'stride': stride_short, 'weight': 0.5},
-        'long_channel': {'patch_len': patch_len_long, 'stride': stride_long, 'weight': 0.5}
+        'short_channel': {'patch_len': patch_len_short, 'stride': stride_short, 'weight': args.weight_short},
+        'long_channel': {'patch_len': patch_len_long, 'stride': stride_long, 'weight': args.weight_long}
     }
+    
+    # Cross-group attention configuration
+    config.cross_group_ffn_ratio = args.cross_group_ffn_ratio
     
     # Set seed
     set_seed(config.random_seed)
