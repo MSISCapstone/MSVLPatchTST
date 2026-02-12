@@ -29,16 +29,51 @@ from types import SimpleNamespace
 from PatchTST_supervised.data_provider.data_factory import data_provider
 from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE, MAPE, MSPE, SMAPE, HuberLoss
 
-FEATURES_TO_PLOT = [
-    'p (mbar)',
-    'T (degC)',
-    'rain (mm)',
-    'wv (m/s)',
-    'max. wv (m/s)',
-    'raining (s)'
-]
+# Import config for consistent feature ordering with plot_msvl.py
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'MSVLPatchTST'))
+from config import MSVLConfig
+
+# Get feature order from config (same as MSVL)
+_config = MSVLConfig()
+FEATURES_TO_PLOT = (
+    _config.channel_groups['long_channel']['target_names'] +
+    _config.channel_groups['short_channel']['target_names']
+)
 
 PLOT_ORDER = FEATURES_TO_PLOT
+
+
+def compute_scaler_params(root_path, data_path, target='OT'):
+    """
+    Compute mean and std for each feature from training data (first 70%).
+    Returns dict: feature_name -> (mean, std)
+    """
+    df = pd.read_csv(Path(root_path) / data_path)
+    
+    # Get columns (same logic as Dataset_Custom)
+    cols = list(df.columns)
+    cols.remove(target)
+    cols.remove('date')
+    df = df[['date'] + cols + [target]]
+    
+    # Training split (first 70%)
+    num_train = int(len(df) * 0.7)
+    train_df = df.iloc[:num_train]
+    
+    # Compute stats for each feature column
+    scaler_params = {}
+    for col in df.columns:
+        if col == 'date':
+            continue
+        scaler_params[col] = (train_df[col].mean(), train_df[col].std())
+    
+    return scaler_params
+
+
+def denormalize(values, mean, std):
+    """Inverse transform: original = normalized * std + mean"""
+    return values * std + mean
 
 
 def find_pred_file(results_src, git_root, model_id_name, seq_len, pred_len):
@@ -115,6 +150,11 @@ def compute_feature_columns(root_path_name, data_path_name, target='OT'):
     return cols + [target]
 
 
+def sanitize_key(name):
+    """Sanitize feature name for use as npz key."""
+    return name.replace(' ', '_').replace('.', '_').replace('(', '').replace(')', '').replace('/', '_')
+
+
 def compute_test_data_statistics(root_path_name, data_path_name, data_columns, out_dir):
     """Compute and save test data statistics for TARGET features only."""
     path = Path(root_path_name) / data_path_name
@@ -148,7 +188,7 @@ def compute_test_data_statistics(root_path_name, data_path_name, data_columns, o
     return stats_df
 
 
-def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
+def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, scaler_params=None):
     """Save per-feature metrics and create prediction plots."""
     os.makedirs(out_dir, exist_ok=True)
 
@@ -211,6 +251,9 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
     metrics_df.to_csv(Path(out_dir) / 'per_feature_metrics.csv', index=False)
     print(f"Saved per-feature metrics to {out_dir}/per_feature_metrics.csv")
 
+    # Dictionary to collect exact plotting data for export
+    plotting_data_dict = {}
+
     # Create 2x3 plot grid for selected features - CONTINUOUS TIME SERIES
     feature_indices = []
     for f in PLOT_ORDER:
@@ -239,6 +282,11 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
         continuous_pred = p.flatten()  # All 384 timesteps
         continuous_true = t.flatten()  # All 384 timesteps
         
+        # Store exact plotting data for export (keyed by sanitized feature name)
+        safe_feat = sanitize_key(feat_name)
+        plotting_data_dict[f'pred_{safe_feat}'] = continuous_pred
+        plotting_data_dict[f'true_{safe_feat}'] = continuous_true
+        
         # Time axis
         x_axis = np.arange(total_timesteps)
         
@@ -266,6 +314,37 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len):
     fig.savefig(fig_file, bbox_inches='tight', dpi=150)
     plt.close(fig)
     print(f"Saved prediction plot to {fig_file}")
+
+    # Export plotting data as CSV - one file per feature (denormalized)
+    plot_data_dir = Path(out_dir) / 'plot_data'
+    plot_data_dir.mkdir(exist_ok=True)
+    for feat_name, pred_arr in plotting_data_dict.items():
+        if feat_name.startswith('pred_'):
+            safe_feat = feat_name[5:]  # Remove 'pred_' prefix
+            true_arr = plotting_data_dict.get(f'true_{safe_feat}', np.zeros_like(pred_arr))
+            
+            # Find the original feature name and denormalize
+            orig_feat_name = None
+            for f in FEATURES_TO_PLOT:
+                if sanitize_key(f) == safe_feat:
+                    orig_feat_name = f
+                    break
+            
+            pred_denorm = pred_arr
+            true_denorm = true_arr
+            if scaler_params and orig_feat_name and orig_feat_name in scaler_params:
+                mean, std = scaler_params[orig_feat_name]
+                pred_denorm = denormalize(pred_arr, mean, std)
+                true_denorm = denormalize(true_arr, mean, std)
+            
+            df = pd.DataFrame({
+                'index': np.arange(len(pred_arr)),
+                'pred': pred_denorm,
+                'true': true_denorm
+            })
+            csv_file = plot_data_dir / f'{safe_feat}.csv'
+            df.to_csv(csv_file, index=False)
+    print(f"Exported plot data CSVs to {plot_data_dir}")
 
     # Save summary text file
     with open(Path(out_dir) / 'summary.txt', 'w') as fh:
@@ -392,8 +471,12 @@ def main():
     # Save test data statistics
     compute_test_data_statistics(root_path_name, args.data_file, data_columns, out_dir)
 
+    # Compute scaler parameters for denormalization
+    scaler_params = compute_scaler_params(root_path_name, args.data_file)
+    print(f"Computed scaler params for {len(scaler_params)} features")
+
     # Save metrics and plots
-    save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len)
+    save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len, scaler_params)
 
     print(f"\nAll outputs saved to: {out_dir}")
 

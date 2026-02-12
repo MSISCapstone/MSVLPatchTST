@@ -28,17 +28,49 @@ from types import SimpleNamespace
 
 from MSVLPatchTST.data_provider.data_factory import data_provider
 from PatchTST_supervised.utils.metrics import MAE, MSE, RMSE, RSE, MAPE, MSPE, SMAPE, HuberLoss
+from MSVLPatchTST.config import MSVLConfig
 
-FEATURES_TO_PLOT = [
-    'p (mbar)',
-    'T (degC)',
-    'rain (mm)',
-    'wv (m/s)',
-    'max. wv (m/s)',
-    'raining (s)'
-]
+# Get feature order from config (not hardcoded)
+# This ensures plot_msvl.py and compare_summaries.py use the same order
+_config = MSVLConfig()
+FEATURES_TO_PLOT = (
+    _config.channel_groups['long_channel']['target_names'] +
+    _config.channel_groups['short_channel']['target_names']
+)
 
 PLOT_ORDER = FEATURES_TO_PLOT
+
+
+def compute_scaler_params(root_path, data_path, target='OT'):
+    """
+    Compute mean and std for each feature from training data (first 70%).
+    Returns dict: feature_name -> (mean, std)
+    """
+    df = pd.read_csv(Path(root_path) / data_path)
+    
+    # Get columns (same logic as Dataset_Custom)
+    cols = list(df.columns)
+    cols.remove(target)
+    cols.remove('date')
+    df = df[['date'] + cols + [target]]
+    
+    # Training split (first 70%)
+    num_train = int(len(df) * 0.7)
+    train_df = df.iloc[:num_train]
+    
+    # Compute stats for each feature column
+    scaler_params = {}
+    for col in df.columns:
+        if col == 'date':
+            continue
+        scaler_params[col] = (train_df[col].mean(), train_df[col].std())
+    
+    return scaler_params
+
+
+def denormalize(values, mean, std):
+    """Inverse transform: original = normalized * std + mean"""
+    return values * std + mean
 
 
 def find_pred_file(results_src, git_root, model_id_name, seq_len, pred_len, patch_len_short=16, stride_short=8, patch_len_long=16, stride_long=8):
@@ -90,6 +122,41 @@ def find_pred_file(results_src, git_root, model_id_name, seq_len, pred_len, patc
         f"Expected location: {primary_loc}\n"
         f"Run inference first: ./main/scripts/weather_msvl_test.sh"
     )
+
+
+def sanitize_key(name):
+    """Sanitize feature name for use as filename."""
+    return name.replace(' ', '_').replace('.', '_').replace('(', '').replace(')', '').replace('/', '_')
+
+
+def load_original_plot_data(git_root, model_id_name, seq_len, pred_len):
+    """
+    Load Original PatchTST plot data from CSVs.
+    Returns (pred_by_feat, true_by_feat) dictionaries mapping feature_name -> array.
+    """
+    model_id = f"{model_id_name}_{seq_len}_{pred_len}"
+    plot_data_dir = Path(git_root) / 'output' / 'Original' / 'test_results' / model_id / 'plot_data'
+    
+    if not plot_data_dir.exists():
+        print(f"Warning: Original plot data not found at {plot_data_dir}")
+        print("Run plot_original.py first to generate the CSV files.")
+        return {}, {}
+    
+    print(f"Loading Original plot data from: {plot_data_dir}")
+    
+    pred_by_feat = {}
+    true_by_feat = {}
+    
+    for feat in FEATURES_TO_PLOT:
+        safe_key = sanitize_key(feat)
+        csv_file = plot_data_dir / f'{safe_key}.csv'
+        if csv_file.exists():
+            df = pd.read_csv(csv_file)
+            pred_by_feat[feat] = df['pred'].values
+            true_by_feat[feat] = df['true'].values
+    
+    print(f"Loaded features: {list(pred_by_feat.keys())}")
+    return pred_by_feat, true_by_feat
 
 
 def build_test_truths(root_path_name, data_path_name, seq_len, label_len, pred_len, batch_size=128, num_workers=0):
@@ -169,7 +236,7 @@ def compute_test_data_statistics(root_path_name, data_path_name, data_columns, o
     return stats_df
 
 
-def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, patch_len_short=16, stride_short=8, patch_len_long=16, stride_long=8):
+def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, patch_len_short=16, stride_short=8, patch_len_long=16, stride_long=8, scaler_params=None):
     """Save per-feature metrics and create prediction plots."""
     os.makedirs(out_dir, exist_ok=True)
 
@@ -247,6 +314,10 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, 
 
     # Total timesteps = num_samples * pred_len (e.g., 4 * 96 = 384)
     total_timesteps = num_samples * actual_pred_len
+    
+    # Build dictionaries keyed by feature name (for comparison plot)
+    pred_by_feat = {}
+    true_by_feat = {}
 
     for ax, feat_name, feat_idx in zip(axes, PLOT_ORDER, feature_indices):
         if feat_idx is None or feat_idx >= preds.shape[-1]:
@@ -258,9 +329,12 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, 
         t = trues[..., feat_idx]  # [num_samples, pred_len]
         
         # Flatten to continuous time series: [num_samples * pred_len]
-        # Each sample's 96 predictions are consecutive in time
-        continuous_pred = p.flatten()  # All 384 timesteps
-        continuous_true = t.flatten()  # All 384 timesteps
+        continuous_pred = p.flatten()
+        continuous_true = t.flatten()
+        
+        # Store by feature name (no indices)
+        pred_by_feat[feat_name] = continuous_pred
+        true_by_feat[feat_name] = continuous_true
         
         # Time axis
         x_axis = np.arange(total_timesteps)
@@ -289,6 +363,31 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, 
     fig.savefig(fig_file, bbox_inches='tight', dpi=150)
     plt.close(fig)
     print(f"Saved prediction plot to {fig_file}")
+
+    # Export plot data as CSV - one file per feature (denormalized)
+    plot_data_dir = Path(out_dir) / 'plot_data'
+    plot_data_dir.mkdir(exist_ok=True)
+    for feat_name in pred_by_feat:
+        safe_feat = sanitize_key(feat_name)
+        pred_arr = pred_by_feat[feat_name]
+        true_arr = true_by_feat[feat_name]
+        
+        # Denormalize if scaler params available
+        pred_denorm = pred_arr
+        true_denorm = true_arr
+        if scaler_params and feat_name in scaler_params:
+            mean, std = scaler_params[feat_name]
+            pred_denorm = denormalize(pred_arr, mean, std)
+            true_denorm = denormalize(true_arr, mean, std)
+        
+        df = pd.DataFrame({
+            'index': np.arange(len(pred_arr)),
+            'pred': pred_denorm,
+            'true': true_denorm
+        })
+        csv_file = plot_data_dir / f'{safe_feat}.csv'
+        df.to_csv(csv_file, index=False)
+    print(f"Exported denormalized plot data CSVs to {plot_data_dir}")
 
     # Save summary text file
     summary_filename = f'summary{file_suffix}.txt'
@@ -344,6 +443,123 @@ def save_stats_and_plot(preds, trues, data_columns, out_dir, seq_len, pred_len, 
         fh.write(f'Huber Loss: {overall_huber:.6f}\n')
 
     print(f"Saved summary to {out_dir}/{summary_filename}")
+    
+    # Build and return denormalized dictionaries for comparison plot
+    pred_by_feat_denorm = {}
+    true_by_feat_denorm = {}
+    for feat_name in pred_by_feat:
+        pred_arr = pred_by_feat[feat_name]
+        true_arr = true_by_feat[feat_name]
+        if scaler_params and feat_name in scaler_params:
+            mean, std = scaler_params[feat_name]
+            pred_by_feat_denorm[feat_name] = denormalize(pred_arr, mean, std)
+            true_by_feat_denorm[feat_name] = denormalize(true_arr, mean, std)
+        else:
+            pred_by_feat_denorm[feat_name] = pred_arr
+            true_by_feat_denorm[feat_name] = true_arr
+    
+    return pred_by_feat_denorm, true_by_feat_denorm
+
+
+def save_comparison_plot(msvl_pred_by_feat, msvl_true_by_feat,
+                         orig_pred_by_feat, orig_true_by_feat,
+                         out_dir, seq_len, pred_len, 
+                         patch_len_short=16, stride_short=8, patch_len_long=16, stride_long=8):
+    """
+    Create a combined comparison plot.
+    All inputs are dictionaries: feature_name -> flattened array (no index lookups).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    
+    # Get total timesteps from first available array
+    sample_arr = None
+    if msvl_pred_by_feat:
+        sample_arr = next(iter(msvl_pred_by_feat.values()))
+    elif orig_pred_by_feat:
+        sample_arr = next(iter(orig_pred_by_feat.values()))
+    
+    if sample_arr is None:
+        print("No data available for comparison plot")
+        return
+    total_timesteps = len(sample_arr)
+    
+    # Create 2x3 comparison plot
+    fig, axes = plt.subplots(2, 3, figsize=(20, 12), constrained_layout=True)
+    axes = axes.flatten()
+    
+    x_axis = np.arange(total_timesteps)
+    
+    for ax, feat_name in zip(axes, FEATURES_TO_PLOT):
+        has_data = False
+        
+        # Get data directly by feature name - NO INDEX LOOKUPS
+        msvl_pred = msvl_pred_by_feat.get(feat_name)
+        msvl_true = msvl_true_by_feat.get(feat_name)
+        orig_pred = orig_pred_by_feat.get(feat_name)
+        orig_true = orig_true_by_feat.get(feat_name)
+        
+        # Use single ground truth (original units should be same)
+        # Prefer orig_true, fallback to msvl_true
+        gt = orig_true if orig_true is not None else msvl_true
+        if gt is not None:
+            ax.plot(x_axis[:len(gt)], gt, label='Ground Truth', 
+                    linewidth=2, color='#006400', alpha=0.9)
+            has_data = True
+        
+        # Plot Original prediction
+        if orig_pred is not None:
+            ax.plot(x_axis[:len(orig_pred)], orig_pred, label='Original PatchTST', 
+                    linewidth=1.5, color='#0D47A1', linestyle='--', alpha=0.8)
+            has_data = True
+        
+        # Plot MSVL prediction
+        if msvl_pred is not None:
+            ax.plot(x_axis[:len(msvl_pred)], msvl_pred, label='MSVL PatchTST', 
+                    linewidth=1.5, color='#C62828', linestyle='-', alpha=0.8)
+            has_data = True
+        
+        if not has_data:
+            ax.text(0.5, 0.5, f'No data for: {feat_name}', ha='center', va='center')
+            ax.set_title(feat_name)
+            continue
+        
+        # Add vertical lines at sample boundaries (assuming pred_len=96)
+        num_samples = total_timesteps // pred_len
+        for i in range(1, num_samples):
+            ax.axvline(x=i * pred_len, color='gray', linestyle=':', alpha=0.3)
+        
+        # Compute metrics for title (both models vs same ground truth)
+        title_parts = [feat_name]
+        if msvl_pred is not None and gt is not None:
+            msvl_mse = np.mean((msvl_pred - gt[:len(msvl_pred)]) ** 2)
+            title_parts.append(f"MSVL MSE={msvl_mse:.2f}")
+        if orig_pred is not None and gt is not None:
+            orig_mse = np.mean((orig_pred - gt[:len(orig_pred)]) ** 2)
+            title_parts.append(f"Orig MSE={orig_mse:.2f}")
+        
+        ax.set_title('\n'.join(title_parts[:1]) + '\n' + ', '.join(title_parts[1:]))
+        ax.legend(loc='upper right', fontsize=8)
+        ax.set_xlabel('Timestep')
+        ax.set_ylabel('Value (original units)')
+        ax.grid(True, alpha=0.3)
+    
+    # Get channel names for title
+    long_names = ', '.join(_config.channel_groups['long_channel']['target_names'])
+    short_names = ', '.join(_config.channel_groups['short_channel']['target_names'])
+    
+    fig.suptitle(
+        f'Comparison: Original vs MSVL PatchTST (Denormalized) - {total_timesteps} Timesteps\n'
+        f'Long channel: {long_names} | Short channel: {short_names}\n'
+        f'short[p{patch_len_short}_s{stride_short}] long[p{patch_len_long}_s{stride_long}]', 
+        fontsize=12
+    )
+    
+    actual_pred_len = pred_len
+    file_suffix = f'_sl{seq_len}_pl{actual_pred_len}_sp{patch_len_short}_ss{stride_short}_lp{patch_len_long}_ls{stride_long}'
+    fig_file = Path(out_dir) / f'comparison_plot{file_suffix}.png'
+    fig.savefig(fig_file, bbox_inches='tight', dpi=150)
+    plt.close(fig)
+    print(f"Saved comparison plot to {fig_file}")
 
 
 def main():
@@ -356,6 +572,9 @@ def main():
     parser.add_argument('--stride_short', type=int, default=8, help='Short channel stride')
     parser.add_argument('--patch_len_long', type=int, default=16, help='Long channel patch length')
     parser.add_argument('--stride_long', type=int, default=8, help='Long channel stride')
+    # Weight arguments (not used for plotting, but accepted for config compatibility)
+    parser.add_argument('--weight_short', type=float, default=1.5, help='(ignored) Loss weight for short channel')
+    parser.add_argument('--weight_long', type=float, default=0.5, help='(ignored) Loss weight for long channel')
     parser.add_argument('--results_src', default=None, help='Path to folder containing pred.npy')
     parser.add_argument('--output_dir', default=None, help='Output directory for results')
     parser.add_argument('--data_root', default=None, help='Path to datasets root')
@@ -435,9 +654,31 @@ def main():
     # Save test data statistics
     compute_test_data_statistics(root_path_name, args.data_file, data_columns, out_dir, file_suffix)
 
-    # Save metrics and plots
-    save_stats_and_plot(preds, trues, data_columns, out_dir, args.seq_len, args.pred_len,
-                       args.patch_len_short, args.stride_short, args.patch_len_long, args.stride_long)
+    # Compute scaler parameters for denormalization
+    scaler_params = compute_scaler_params(root_path_name, args.data_file)
+    print(f"Computed scaler params for {len(scaler_params)} features")
+
+    # Save metrics and plots - returns dictionaries keyed by feature name (denormalized)
+    msvl_pred_by_feat, msvl_true_by_feat = save_stats_and_plot(
+        preds, trues, data_columns, out_dir, args.seq_len, args.pred_len,
+        args.patch_len_short, args.stride_short, args.patch_len_long, args.stride_long,
+        scaler_params
+    )
+
+    # Load Original plot data from CSVs
+    orig_pred_by_feat, orig_true_by_feat = load_original_plot_data(
+        git_root, args.model_id_name, args.seq_len, args.pred_len
+    )
+    
+    if orig_pred_by_feat:
+        save_comparison_plot(
+            msvl_pred_by_feat, msvl_true_by_feat,
+            orig_pred_by_feat, orig_true_by_feat,
+            out_dir, args.seq_len, args.pred_len,
+            args.patch_len_short, args.stride_short, args.patch_len_long, args.stride_long
+        )
+    else:
+        print("Skipping comparison plot - run plot_original.py first to generate CSV files")
 
     print(f"\nAll outputs saved to: {out_dir}")
 
