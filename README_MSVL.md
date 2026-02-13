@@ -238,7 +238,6 @@ Output: [batch, pred_len=96, channels=21]
 ### MSVLPatchTST Architecture
 
 ```
-```
 Input: [batch, seq_len=336, channels=22]
        (20 weather + 2 hour features: sin/cos)
     │
