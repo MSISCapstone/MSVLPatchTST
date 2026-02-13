@@ -168,7 +168,31 @@ Both models are evaluated on these 6 target features:
 | `rain (mm)` | Rainfall |
 | `raining (s)` | Raining duration |
 
-## 6. Model Architectures
+## 6. Training & evaluation (technical details)
+
+- **Loss used** ✅
+  - Training uses the criterion selected via `--loss` in `MSVLPatchTST/run_longExp.py` (options: `huber` → `torch.nn.HuberLoss`, `mse` → `MSELoss`, `mae` → `L1Loss`).
+  - The training loop (`MSVLPatchTST/trainer.py`) computes a **group‑weighted** loss (each channel group multiplied by its `patch_configs[<group>]['weight']`) and backpropagates on the summed loss.
+
+- **Target features** 🎯
+  - The model predicts **6 weather targets** (see section above). Group mapping (from `MSVLPatchTST/config.py`):
+    - `Channel Group - 1` → `p (mbar)` (idx 0), `T (degC)` (idx 1), `rain (mm)` (idx 14)
+    - `Channel Group - 2` → `wv (m/s)` (idx 11), `max. wv (m/s)` (idx 12), `raining (s)` (idx 15)
+  - Evaluation and loss are computed only on these 6 target channels.
+
+- **Learning rate & scheduler** 🔧
+  - Default LR: `1e-4` (`config.learning_rate`, overridable with `--learning_rate`).
+  - Optimizer: `AdamW(model.parameters(), lr=config.learning_rate, weight_decay=1e-4)`.
+  - Scheduler: default `OneCycleLR(max_lr=config.learning_rate)`; also supports epochwise policies via `--lradj` (e.g. `type3`, `constant`, `TST`) handled by `adjust_learning_rate`.
+
+- **Other critical items** ⚠️
+  - **RevIN normalization**: inputs (all 22 channels) are normalized/denormalized in `models.py`; denormalization is applied to the 6 target outputs using stored RevIN stats.
+  - **Early stopping & checkpoints**: EarlyStopping saves the best model to `checkpoint.pth` and `trainer.py` loads this best checkpoint after training.
+  - **Training loader detail**: `train_model` currently concatenates train/val/test datasets into a single `combined_loader` for training iterations — verify this behavior if you expect strict train/val/test separation.
+  - **Evaluation metrics**: `MSVLPatchTST/evaluation.py` reports MAE, MSE, RMSE, MAPE, MSPE, RSE and Pearson correlation; per‑channel metrics are available via `evaluate_per_channel`.
+  - **Sliding-window evaluation** helper (`evaluate_model_sliding_window`) is provided for multi-window inference experiments.
+
+## 7. Model Architectures
 
 ### Original PatchTST Architecture
 
@@ -213,6 +237,7 @@ Output: [batch, pred_len=96, channels=21]
 
 ### MSVLPatchTST Architecture
 
+```
 ```
 Input: [batch, seq_len=336, channels=22]
        (20 weather + 2 hour features: sin/cos)
@@ -284,14 +309,14 @@ Output: [batch, pred_len=96, channels=6]
 **Key characteristics:**
 - Multi-scale patching: Long (16) for slow dynamics, Short (12) for fast dynamics
 - Grouping: 
-  - Long channel: p, T, rain (slow dynamics)
-  - Short channel: wv, max.wv, raining (fast dynamics)
+  - Channel Group - 1: p, T, rain (slow dynamics)
+  - Channel Group - 2: wv, max.wv, raining (fast dynamics)
 - Hour integration: sin/cos hour features in all encoders
 - Cross-group attention: Learns physical couplings between groups
 - MSE optimized only on 6 target features
 - Parameters: ~21M
 
-## 7. Model Comparison
+## 8. Model Comparison
 
 | Aspect | Original PatchTST | MSVLPatchTST |
 |--------|-------------------|--------------|
