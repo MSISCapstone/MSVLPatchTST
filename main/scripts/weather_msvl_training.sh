@@ -150,6 +150,8 @@ do
       --patience 3 \
       --checkpoints "$GIT_REPO_ROOT/output/MSVLPatchTST/checkpoints" \
       --itr 1 --batch_size 128 --learning_rate 0.0001 >> "$log_file" 2>&1
+      --loss huber \
+
     
     echo "========================================" | tee -a "$log_file"
     echo "Training completed for pred_len=${pred_len}" | tee -a "$log_file"
